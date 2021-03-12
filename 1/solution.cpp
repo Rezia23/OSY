@@ -92,6 +92,7 @@ void CCargoPlanner::Stop() {
 }
 
 void CCargoPlanner::SalesFunc(){
+    //printf("sales starts\n");
     AShip myShip;
     while(1){
     //todo -- maybe done
@@ -100,12 +101,14 @@ void CCargoPlanner::SalesFunc(){
         if(m_Ships.empty()){
             mutShip.unlock();
             if(stopSignal){
+                //printf("Stoppin  now\n");
                 break;
             }else{
                 continue;
             }
         }else{
-            myShip = m_Ships.front();
+            myShip = m_Ships.back();
+            m_Ships.pop_back();
             mutShip.unlock();
 
             vector<CCargo> tmpCargo;
@@ -116,15 +119,18 @@ void CCargoPlanner::SalesFunc(){
                 m_Customers[i]->Quote(myShip->Destination(),tmpCargo);
                 cargo.insert(cargo.end(), tmpCargo.begin(), tmpCargo.end());
             }
+            //printf("puttin stuff to possibleCargoShip %s\n", myShip->Destination().c_str());
             mutCargo.lock();
             m_PossibleCargoShip.emplace_back(myShip, cargo);
             mutCargo.unlock();
             sem_post(&semSalesWorkers);
+            //printf("have put stuff to possibleCargoShip %s\n", myShip->Destination().c_str());
         }
     }
 }
 void CCargoPlanner::WorkersFunc() {
     //todo -- maybe done
+    //printf("starting worker\n");
     pair<AShip, vector <CCargo>> shipAndCargo;
     while(1){
         sem_wait(&semSalesWorkers);
@@ -134,10 +140,12 @@ void CCargoPlanner::WorkersFunc() {
             break;
         } else{
             vector<CCargo> load;
-            shipAndCargo = m_PossibleCargoShip.front();
+            shipAndCargo = m_PossibleCargoShip.back();
+            m_PossibleCargoShip.pop_back();
             mutCargo.unlock();
             SeqSolver(shipAndCargo.second, shipAndCargo.first->MaxWeight(), shipAndCargo.first->MaxVolume(), load );
             shipAndCargo.first->Load(load);
+            //printf("loaded stuff");
         }
     }
 }
@@ -161,9 +169,11 @@ void CCargoPlanner::Customer(ACustomer customer) {
 }
 
 void CCargoPlanner::Ship(AShip ship) {
+    //printf("adding ship\n");
     mutShip.lock();
     m_Ships.push_back(ship);
     mutShip.unlock();
+    //printf("added ship\n");
     sem_post(&semShipSales);
 }
 
