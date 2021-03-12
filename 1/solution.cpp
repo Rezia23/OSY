@@ -93,7 +93,7 @@ void CCargoPlanner::Stop() {
 
 void CCargoPlanner::SalesFunc(){
     AShip myShip;
-    while(!stopSignal){
+    while(1){
     //todo -- maybe done
         sem_wait(&semShipSales);
         mutShip.lock();
@@ -110,6 +110,8 @@ void CCargoPlanner::SalesFunc(){
 
             vector<CCargo> tmpCargo;
             vector<CCargo> cargo;
+
+
             for(size_t i = 0; i<m_Customers.size();i++){
                 m_Customers[i]->Quote(myShip->Destination(),tmpCargo);
                 cargo.insert(cargo.end(), tmpCargo.begin(), tmpCargo.end());
@@ -124,7 +126,7 @@ void CCargoPlanner::SalesFunc(){
 void CCargoPlanner::WorkersFunc() {
     //todo -- maybe done
     pair<AShip, vector <CCargo>> shipAndCargo;
-    while(!stopSignal){
+    while(1){
         sem_wait(&semSalesWorkers);
         mutCargo.lock();
         if(m_PossibleCargoShip.empty()){
