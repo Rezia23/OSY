@@ -90,7 +90,7 @@ public:
         return memLimit;
     }
 
-    void removeFew(uint32_t pageNum, uint32_t numToRemove, uint32_t numPresent, uint32_t * memory){
+    void removeFew(uint32_t pageNum, uint32_t numToRemove, uint32_t numPresent, uint8_t * memory){
         uint32_t numToStay = numPresent-numToRemove;
         for(uint32_t i = 0; i<numToRemove;i++){
             uint32_t deletedPage;
@@ -105,16 +105,18 @@ public:
         }
 
     }
-    void addFew(uint32_t pageNum, uint32_t numToAdd, uint32_t numPresent, uint32_t * memory, uint32_t * currFreePages, uint32_t * freePagesIndex){
+    void addFew(uint32_t pageNum, uint32_t numToAdd, uint32_t numPresent, uint8_t * memory, uint32_t * currFreePages, uint32_t * freePagesIndex){
+        printf("Adding page with num %d\nnum present %d\nnum to add %d\n", pageNum, numPresent, numToAdd);
         for(uint32_t i = numPresent; i<numToAdd+numPresent;i++){
             uint32_t entry = 0x0007 | (currFreePages[(*freePagesIndex)-1]<<12);
-            memset(memory + (pageNum * PAGE_SIZE) + 4*i, entry, 4);
+            printf("copying to %d %d %d\n", pageNum, PAGE_SIZE, (pageNum * PAGE_SIZE) + 4*i);
+            memcpy(memory + (pageNum * PAGE_SIZE) + 4*i, &entry, 4);
             (*freePagesIndex)--;
         }
     }
 
     virtual bool SetMemLimit(uint32_t pages){
-        uint32_t * memory = (uint32_t *) m_MemStart;
+        uint8_t * memory = (uint8_t *) m_MemStart;
         if(pages < memLimit){
             uint32_t numToRemove = memLimit - pages;
             uint32_t lastSecondLevelPageNum;
@@ -183,7 +185,7 @@ public:
                 numToAdd -= numActuallyAddedPages;
                 //add entry to first level table
                 uint32_t entry = 0x0007 | (pageNum << 12);
-                memset(memory + (m_PageTableRoot * PAGE_SIZE), entry, 4);
+                memcpy(memory + (m_PageTableRoot * PAGE_SIZE), &entry, 4);
                 numSecondLevelPageTables = 1;
                 numInLastSecondLevelPageTable = numActuallyAddedPages < (PAGE_SIZE / 4) ? numActuallyAddedPages : 0;
             }
@@ -206,14 +208,14 @@ public:
                 numToAdd -= PAGE_SIZE / 4;
                 //add entry to root table
                 uint32_t entry = 0x0007 | (pageNum << 12);
-                memset(memory + (m_PageTableRoot * PAGE_SIZE) + numWholePages * 4, entry, 4);
+                memcpy(memory + (m_PageTableRoot * PAGE_SIZE) + numWholePages * 4, &entry, 4);
                 numSecondLevelPageTables++;
             }
             if (remainder != 0) {
                 uint32_t pageNum = currFreePages[numNeeded - 1];
                 addFew(pageNum, remainder, 0, memory, currFreePages, &numNeeded);
                 uint32_t entry = 0x0007 | (pageNum << 12);
-                memset(memory + (m_PageTableRoot * PAGE_SIZE) + numSecondLevelPageTables * 4, entry, 4);
+                memcpy(memory + (m_PageTableRoot * PAGE_SIZE) + numSecondLevelPageTables * 4, &entry, 4);
                 numSecondLevelPageTables++;
                 numInLastSecondLevelPageTable += remainder;
 
