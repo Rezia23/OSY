@@ -126,8 +126,9 @@ public:
         if(pages < memLimit){
             uint32_t numToRemove = memLimit - pages;
             uint32_t lastSecondLevelPageNum;
-            memcpy(&lastSecondLevelPageNum, memory + (m_PageTableRoot * PAGE_SIZE) + (numSecondLevelPageTables-1)*4, 4); //times 4 because one entry is 4 bytes
+            memcpy(&lastSecondLevelPageNum, memory + calculateAddressShift(m_PageTableRoot, numSecondLevelPageTables-1), 4); //times 4 because one entry is 4 bytes
             lastSecondLevelPageNum = lastSecondLevelPageNum >> 12;
+            //TODO when memLimit is 5000 and we are setting to 2000, numInLastSecondLevelPageTable is 5000 which is some random bullshit
             if(numToRemove < numInLastSecondLevelPageTable){
                 //remove few, set numILSLPT, set memLimit, push to stack
                 removeFew(lastSecondLevelPageNum, numToRemove, numInLastSecondLevelPageTable, memory);
