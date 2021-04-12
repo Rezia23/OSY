@@ -20,20 +20,20 @@ public:
     Stack() = default;
     Stack(uint32_t i){
         stack = new uint32_t [i];
-        printf("start: %d\n", i);
+        //printf("start: %d\n", i);
         for(uint32_t j = 0; j<i ; j++){
             stack[j] = j;
         }
         tail = i;
     }
     void push(uint32_t i){
-        printf("pushing to pos %d", i);
+        //printf("pushing to pos %d", i);
         stack[tail] = i;
         tail++;
     }
     uint32_t pop(){
         tail--;
-        printf("popping from pos %d\n", tail);
+        //printf("popping from pos %d\n", tail);
         return stack[tail];
     }
     uint32_t numFree(){
@@ -62,6 +62,7 @@ uint32_t calculateAddressShift(uint32_t page, uint32_t pageEntry){
 class CCPUChild : public CCPU {
 private:
     int numNeededPages(uint32_t pagesInStack, uint32_t pagesDesired){
+        uint32_t originalPageNum = pagesDesired;
         if(pagesInStack < pagesDesired){
             return pagesDesired;
         }
@@ -78,7 +79,7 @@ private:
         }
         uint32_t residue = pagesDesired%(PAGE_SIZE/4);
         uint32_t newSecondLevelPages = (pagesDesired-residue)/(PAGE_SIZE/4);
-        pagesNeeded = pagesDesired + newSecondLevelPages;
+        pagesNeeded = originalPageNum + newSecondLevelPages;
         if(residue!=0){
             pagesNeeded++;
         }
@@ -106,16 +107,16 @@ public:
             pthread_mutex_lock(&stackMut);
             freePages.push(deletedPage);
             pthread_mutex_unlock(&stackMut);
-            memLimit -=numToRemove;
-            numInLastSecondLevelPageTable-= numToRemove;
         }
+        memLimit -=numToRemove;
+        numInLastSecondLevelPageTable-= numToRemove;
 
     }
     void addFew(uint32_t pageNum, uint32_t numToAdd, uint32_t numPresent, uint8_t * memory, uint32_t * currFreePages, uint32_t * freePagesIndex){
-        printf("Adding page with num %d\nnum present %d\nnum to add %d\n", pageNum, numPresent, numToAdd);
+        //printf("Adding page with num %d\nnum present %d\nnum to add %d\n", pageNum, numPresent, numToAdd);
         for(uint32_t i = numPresent; i<numToAdd+numPresent;i++){
             uint32_t entry = 0x00000007 | (currFreePages[(*freePagesIndex)-1]<<12);
-            printf("copying to %d %d %d\n", pageNum, PAGE_SIZE, (pageNum * PAGE_SIZE) + 4*i);
+            //printf("copying to %d %d %d\n", pageNum, PAGE_SIZE, (pageNum * PAGE_SIZE) + 4*i);
             memcpy(memory + calculateAddressShift(pageNum, i), &entry, 4);
             (*freePagesIndex)--;
         }
@@ -126,7 +127,7 @@ public:
         if(pages < memLimit){
             uint32_t numToRemove = memLimit - pages;
             uint32_t lastSecondLevelPageNum;
-            memcpy(&lastSecondLevelPageNum, memory + calculateAddressShift(m_PageTableRoot, numSecondLevelPageTables-1), 4); //times 4 because one entry is 4 bytes
+            memcpy(&lastSecondLevelPageNum, memory + calculateAddressShift(m_PageTableRoot>>12, numSecondLevelPageTables-1), 4); //times 4 because one entry is 4 bytes
             lastSecondLevelPageNum = lastSecondLevelPageNum >> 12;
             //TODO when memLimit is 5000 and we are setting to 2000, numInLastSecondLevelPageTable is 5000 which is some random bullshit
             if(numToRemove < numInLastSecondLevelPageTable){
@@ -138,30 +139,32 @@ public:
             numToRemove -= numInLastSecondLevelPageTable;
             removeFew(lastSecondLevelPageNum, numInLastSecondLevelPageTable, numInLastSecondLevelPageTable, memory);
             //remove entry in first table, push second page to stack
-            memset(memory + (m_PageTableRoot * PAGE_SIZE) + (numSecondLevelPageTables-1)*4, 0, 4);
+            memset(memory + calculateAddressShift(m_PageTableRoot>>12, numSecondLevelPageTables-1), 0, 4);
             pthread_mutex_lock(&stackMut);
             freePages.push(lastSecondLevelPageNum);
             pthread_mutex_unlock(&stackMut);
+            numInLastSecondLevelPageTable = (PAGE_SIZE/4);
 
             uint32_t remainder = numToRemove%(PAGE_SIZE/4);
             uint32_t numWholePagesToRemove = (numToRemove - remainder)/(PAGE_SIZE/4);
             uint32_t pageNum;
             while(numWholePagesToRemove > 0){
 
-                memcpy(&pageNum, memory + calculateAddressShift(m_PageTableRoot, numSecondLevelPageTables-1), 4);
+                memcpy(&pageNum, memory + calculateAddressShift(m_PageTableRoot>>12, numSecondLevelPageTables-1), 4);
                 pageNum = pageNum >> 12;
                 removeFew(pageNum, PAGE_SIZE/4, PAGE_SIZE/4, memory);
 
-                memset(memory + calculateAddressShift(m_PageTableRoot, numSecondLevelPageTables-1), 0, 4);
+                memset(memory + calculateAddressShift(m_PageTableRoot>>12, numSecondLevelPageTables-1), 0, 4);
                 pthread_mutex_lock(&stackMut);
                 freePages.push(pageNum);
                 pthread_mutex_unlock(&stackMut);
                 numWholePagesToRemove--;
                 numSecondLevelPageTables--;
+                numInLastSecondLevelPageTable = (PAGE_SIZE/4);
             }
             //remove few
             if(remainder!=0){
-                memcpy(&pageNum, memory + calculateAddressShift(m_PageTableRoot, numSecondLevelPageTables-1), 4);
+                memcpy(&pageNum, memory + calculateAddressShift(m_PageTableRoot>>12, numSecondLevelPageTables-1), 4);
                 pageNum = pageNum >> 12;
                 removeFew(pageNum, remainder, PAGE_SIZE/4, memory);
             }
@@ -175,7 +178,7 @@ public:
             uint32_t *currFreePages;
             pthread_mutex_lock(&stackMut);
             uint32_t numNeeded = numNeededPages(freePages.numFree(), numToAdd);
-            printf("oni chcou %d, ja mam %d, chybi mi %d num needed is %d\n", pages, memLimit, numToAdd, numNeeded);
+            //printf("oni chcou %d, ja mam %d, chybi mi %d num needed is %d\n", pages, memLimit, numToAdd, numNeeded);
             if (numNeeded > freePages.numFree()) {
                 pthread_mutex_unlock(&stackMut);
                 return false;
@@ -195,15 +198,15 @@ public:
                 numToAdd -= numActuallyAddedPages;
                 //add entry to first level table
                 uint32_t entry = 0x00000007 | (pageNum << 12);
-                memcpy(memory + calculateAddressShift(m_PageTableRoot,0), &entry, 4);
+                memcpy(memory + calculateAddressShift(m_PageTableRoot>>12,0), &entry, 4);
                 numSecondLevelPageTables = 1;
                 numInLastSecondLevelPageTable = numActuallyAddedPages < (PAGE_SIZE / 4) ? numActuallyAddedPages : 0;
             }
             if (numInLastSecondLevelPageTable != 0) {
-                printf("we do stuff here");
-                uint32_t numToActuallyAdd = numToAdd < (PAGE_SIZE-4)-numInLastSecondLevelPageTable ? numToAdd :(PAGE_SIZE-4)-numInLastSecondLevelPageTable;
+                //printf("we do stuff here");
+                uint32_t numToActuallyAdd = numToAdd < (PAGE_SIZE/4)-numInLastSecondLevelPageTable ? numToAdd :(PAGE_SIZE/4)-numInLastSecondLevelPageTable;
                 uint32_t pageNum;
-                memcpy(&pageNum, memory + calculateAddressShift(m_PageTableRoot, numSecondLevelPageTables-1), 4);
+                memcpy(&pageNum, memory + calculateAddressShift(m_PageTableRoot>>12, numSecondLevelPageTables-1), 4);
                 pageNum = pageNum >> 12;
                 addFew(pageNum, numToActuallyAdd, numInLastSecondLevelPageTable, memory,
                        currFreePages, &numNeeded);
@@ -220,20 +223,20 @@ public:
                 numToAdd -= PAGE_SIZE / 4;
                 //add entry to root table
                 uint32_t entry = 0x00000007 | (pageNum << 12);
-                memcpy(memory + calculateAddressShift(m_PageTableRoot, numSecondLevelPageTables), &entry, 4);
+                memcpy(memory + calculateAddressShift(m_PageTableRoot>>12, numSecondLevelPageTables), &entry, 4);
                 numSecondLevelPageTables++;
             }
             if (remainder != 0) {
                 uint32_t pageNum = currFreePages[numNeeded - 1];
                 addFew(pageNum, remainder, 0, memory, currFreePages, &numNeeded);
                 uint32_t entry = 0x00000007 | (pageNum << 12);
-                memcpy(memory + calculateAddressShift(m_PageTableRoot, numSecondLevelPageTables), &entry, 4);
+                memcpy(memory + calculateAddressShift(m_PageTableRoot>>12, numSecondLevelPageTables), &entry, 4);
                 numSecondLevelPageTables++;
-                numInLastSecondLevelPageTable += remainder;
+                numInLastSecondLevelPageTable = remainder;
 
             }
             if (numNeeded != 1) {
-                printf("je to rozbity");
+                //printf("je to rozbity");
             }
             delete[] currFreePages;
             memLimit = pages;
@@ -286,7 +289,7 @@ void threadFunc(void * data){
 
     startPageTable(pageTableIndex, (uint8_t *)ti->mem);
 
-    CCPUChild cpu = CCPUChild(ti->mem, pageTableIndex);
+    CCPUChild cpu = CCPUChild(ti->mem, pageTableIndex<<12);
     ti->mainProcess(&cpu, ti->processArg);
 
     pthread_mutex_lock(&threadMut);
