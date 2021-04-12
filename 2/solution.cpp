@@ -48,13 +48,16 @@ pthread_mutex_t stackMut;
 pthread_cond_t cv;
 Stack freePages;
 //------------------------------------------------
+class CCPUChild;
 struct threadInfo{
     void * mem;
     void * processArg;
     void (* mainProcess)(CCPU *, void *);
+    bool copyMem;
+    CCPUChild * parentCPU;
 };
 void threadFunc(void * data);
-
+void startPageTable(uint32_t page, uint8_t * mem);
 uint32_t calculateAddressShift(uint32_t page, uint32_t pageEntry){
     return (page * CCPU::PAGE_SIZE) + (pageEntry*4);
 }
@@ -276,8 +279,15 @@ public:
     }
 
     virtual bool NewProcess(void *processArg, void (*entryPoint)(CCPU *, void *), bool copyMem){
+        pthread_mutex_lock(&stackMut);
+        if(copyMem && this->numInLastSecondLevelPageTable + this->numSecondLevelPageTables + 1 > freePages.numFree()){
+            pthread_mutex_unlock(&stackMut);
+            return false;
+        }
+        pthread_mutex_unlock(&stackMut);
+
         pthread_mutex_lock(&threadMut);
-        if(numThreads >= PROCESS_MAX){ //todo might be >
+        if(numThreads >= PROCESS_MAX){
             pthread_mutex_unlock(&threadMut);
             return false;
         }
@@ -288,12 +298,78 @@ public:
         pthread_attr_init(&attr);
         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
-        threadInfo * ti = new threadInfo {this->m_MemStart, (processArg), entryPoint};
+        threadInfo * ti = new threadInfo {this->m_MemStart, (processArg), entryPoint, copyMem, this};
         pthread_t tid;
-        
+
         //create thread
         pthread_create(&tid, &attr, reinterpret_cast<void *(*)(void *)>(threadFunc), (void *)ti);
         return true;
+    }
+
+    static void copyNext(CCPUChild * parentCPU, CCPUChild * childCPU, uint32_t firstLevelEntry, uint32_t secondLevelEntry){
+        uint8_t * memory = parentCPU->m_MemStart;
+        uint32_t secondLevelPageInParent;
+        memcpy(&secondLevelPageInParent, memory + calculateAddressShift(parentCPU->m_PageTableRoot>>12,firstLevelEntry), 4);
+        uint32_t secondLevelPageInChild;
+        memcpy(&secondLevelPageInChild, memory + calculateAddressShift(childCPU->m_PageTableRoot>>12,firstLevelEntry), 4);
+
+        secondLevelPageInParent = secondLevelPageInParent >> 12;
+        secondLevelPageInChild = secondLevelPageInChild >> 12;
+
+        uint32_t pageInParent;
+        uint32_t pageInChild;
+        memcpy(&pageInParent, memory + calculateAddressShift(secondLevelPageInParent, secondLevelEntry),4);
+        memcpy(&pageInChild, memory + calculateAddressShift(secondLevelPageInChild, secondLevelEntry),4);
+
+        pageInParent = pageInParent >> 12;
+        pageInChild = pageInChild >> 12;
+
+        memcpy(memory + calculateAddressShift(pageInChild, 0), memory + calculateAddressShift(pageInParent, 0), PAGE_SIZE);
+
+    }
+
+    static void copyPages(CCPUChild * parentCPU, CCPUChild * childCPU){
+        if(parentCPU->numSecondLevelPageTables == 0) return;
+        for(uint32_t i = 0; i<parentCPU->numSecondLevelPageTables-1;i++){
+            for(uint32_t j = 0; j<PAGE_DIR_ENTRIES;j++){
+                copyNext(parentCPU, childCPU, i, j);
+            }
+        }
+        for(uint32_t j = 0; j<parentCPU->numInLastSecondLevelPageTable;j++){
+            copyNext(parentCPU, childCPU, parentCPU->numSecondLevelPageTables-1, j);
+        }
+    }
+
+
+    static void threadFunc(void * data){
+        threadInfo * ti = (threadInfo *)data;
+
+        //find free page for page table
+        pthread_mutex_lock(&stackMut);
+        uint32_t pageTableIndex = freePages.pop();
+        pthread_mutex_unlock(&stackMut);
+
+        startPageTable(pageTableIndex, (uint8_t *)ti->mem);
+
+        CCPUChild cpu = CCPUChild(ti->mem, pageTableIndex<<12);
+
+        if(ti->copyMem){
+            cpu.SetMemLimit(ti->parentCPU->memLimit);
+            copyPages(ti->parentCPU, &cpu);
+            cpu.numSecondLevelPageTables = ti->parentCPU->numSecondLevelPageTables;
+            cpu.numInLastSecondLevelPageTable = ti->parentCPU->numInLastSecondLevelPageTable;
+        }
+
+
+        ti->mainProcess(&cpu, ti->processArg);
+
+        pthread_mutex_lock(&threadMut);
+        numThreads--;
+        if(numThreads == 0){
+            pthread_cond_signal(&cv);
+        }
+        pthread_mutex_unlock(&threadMut);
+        delete ti;
     }
 
 protected:
@@ -310,27 +386,6 @@ void startPageTable(uint32_t page, uint8_t * mem){
 
 
 
-void threadFunc(void * data){
-    threadInfo * ti = (threadInfo *)data;
-
-    //find free page for page table
-    pthread_mutex_lock(&stackMut);
-    uint32_t pageTableIndex = freePages.pop();
-    pthread_mutex_unlock(&stackMut);
-
-    startPageTable(pageTableIndex, (uint8_t *)ti->mem);
-
-    CCPUChild cpu = CCPUChild(ti->mem, pageTableIndex<<12);
-    ti->mainProcess(&cpu, ti->processArg);
-
-    pthread_mutex_lock(&threadMut);
-    numThreads--;
-    if(numThreads == 0){
-        pthread_cond_signal(&cv);
-    }
-    pthread_mutex_unlock(&threadMut);
-    delete ti;
-}
 
 
 void MemMgr(void *mem, uint32_t totalPages, void *processArg, void (*mainProcess)(CCPU *, void *)) {
