@@ -71,7 +71,7 @@ private:
         uint32_t pagesNeeded = 0;
         if(tmpNumILSLPT < PAGE_SIZE/4 && numSecondLevelPageTables!=0){
             uint32_t freeEntries = (PAGE_SIZE/4) -tmpNumILSLPT;
-            if(freeEntries > pagesDesired){
+            if(freeEntries >= pagesDesired){
                 return pagesDesired;
             }
             pagesDesired-=(PAGE_SIZE/4 - tmpNumILSLPT);
@@ -79,7 +79,7 @@ private:
         uint32_t residue = pagesDesired%(PAGE_SIZE/4);
         uint32_t newSecondLevelPages = (pagesDesired-residue)/(PAGE_SIZE/4);
         pagesNeeded = pagesDesired + newSecondLevelPages;
-        if(residue==0){
+        if(residue!=0){
             pagesNeeded++;
         }
         return pagesNeeded;
