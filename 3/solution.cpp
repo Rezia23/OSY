@@ -40,6 +40,8 @@ struct TBlkDev {
 
 class CFileSystem {
 public:
+    CFileSystem(TBlkDev & oldDev) : dev(move(oldDev)){}
+
     static bool CreateFs(const TBlkDev &dev);
 
     static CFileSystem *Mount(const TBlkDev &dev);
@@ -63,16 +65,70 @@ public:
     bool FindNext(TFile &file);
 
 private:
-    // todo
+    TBlkDev dev;
+    static size_t maxSectors;
+    static size_t numSectorsForMetadata;
+    static void writeInfoData(const void * data, size_t len, const TBlkDev & dev, size_t numSectorsUsed){
+        char * mem = new char [numSectorsUsed*SECTOR_SIZE];
+        memcpy(mem, (char * )data, len);
+        dev.m_Write(0, mem, numSectorsUsed);
+    }
+};
+
+struct FileMetaData{
+    char name [FILENAME_LEN_MAX+1];
+    size_t size;
+    size_t start;
+    FileMetaData(){
+        memset(name, 0, sizeof name);
+        size = 0;
+        start = 0;
+    }
+};
+
+struct FATentry{
+    int next;
+    bool free = true;
 };
 
 
-bool CFileSystem::CreateFs(const TBlkDev &dev) {
-    //create FAT
+struct FileSystemInfo{
+    FileMetaData fileMetaData [DIR_ENTRIES_MAX];
+    size_t firstFreeBlock;
+    FATentry * FAT;
+    FileSystemInfo(size_t numSectors){
+        FAT = new FATentry [numSectors];
+        for(int i = 0; i<numSectors;i++){
+            FAT[i].next = i+1;
+        }
+        FAT[numSectors-1].next = EOF;
+        firstFreeBlock = 0;
+    }
+    void useFirstNBlocks(size_t n){
+        for(int i = 0; i<n;i++){
+            FAT[i].next= EOF;
+            FAT[i].free = false;
+        }
+        firstFreeBlock = n;
+    }
+};
 
-    //store first free block
-    //store linked list of free blocks
-    return false;
+bool CFileSystem::CreateFs(const TBlkDev &dev) {
+    maxSectors = dev.m_Sectors;
+    FileSystemInfo fsInfo(dev.m_Sectors);
+    size_t len = sizeof(fsInfo);
+    numSectorsForMetadata = len/SECTOR_SIZE;
+    if(len%SECTOR_SIZE != 0){
+        numSectorsForMetadata++;
+    }
+    fsInfo.useFirstNBlocks(numSectorsForMetadata);
+    writeInfoData(&fsInfo, sizeof(fsInfo), dev, numSectorsForMetadata);
+    return true;
+}
+
+CFileSystem *CFileSystem::Mount(const TBlkDev &dev) {
+    TBlkDev copy = dev;
+    return new CFileSystem(copy);
 }
 
 
