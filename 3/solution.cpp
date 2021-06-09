@@ -90,6 +90,7 @@ struct openFileEntry{
     bool isValid = false;
     char name [FILENAME_LEN_MAX+1];
     bool writeMode;
+    int offset = 0;
 };
 class CFileSystem {
 public:
@@ -253,14 +254,7 @@ int CFileSystem::openExisting(const char * fileName, bool writeMode){
     }
     return -1;
 }
-//metoda otevře soubor zadaného jména. Soubor je otevřen buď
-//pro zápis (writeMode je true) nebo pro čtení (writeMode je false).
-//Pokud je soubor otevíraný pro zápis a neexistuje, je vytvořený nový (s nulovou délkou).
-//Pokud je soubor otevíraný pro zápis a již existuje, je zkrácen na délku 0 bajtů (truncate).
-//Konečně, pokud je soubor otevíraný pro čtení a neexistuje, ve vrácena chyba.
-//Návratovou hodnotou je identifikátor otevřeného souboru (file deskriptor).
-//Platné identifikátory otevřených souborů jsou kladná čísla a nula. Hodnota -1 znamená neúspěch
-//(neexistující soubor otevíraný pro čtení, nově vytvářený soubor při zaplněném systému souborů).
+
 int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
     if(filesOpened >= OPEN_FILES_MAX){
         return -1;
@@ -276,7 +270,6 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
             createFile(fileName);
             return openExisting(fileName, writeMode);
         }
-
     } else{
         if(findFile(fileName) != -1){
             return openExisting(fileName, writeMode);
@@ -286,7 +279,22 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
     }
 }
 
+size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
+    size_t firstNeededSectorOrder = openFiles[fd].offset/SECTOR_SIZE;
+    if(openFiles[fd].offset%SECTOR_SIZE!=0){
+        firstNeededSectorOrder++;
+    }
+    size_t numNeededSectors = (openFiles[fd].offset%SECTOR_SIZE + len)/SECTOR_SIZE;
+    if((openFiles[fd].offset%SECTOR_SIZE + len)%SECTOR_SIZE!= 0){
+        numNeededSectors++;
+    }
+    //todo find needed sector nums in FAT
 
+    //todo copy sectors to *data
+
+    //increase offset
+    return 0;
+}
 
 
 #ifndef __PROGTEST__
