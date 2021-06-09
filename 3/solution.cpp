@@ -130,9 +130,10 @@ private:
         dev.m_Write(0, mem, numSectorsUsed);
     }
     int openExisting(const char * fileName, bool writeMode);
-    bool existsFile(const char *fileName) const;
+    int findFile(const char *fileName) const;
     void createFile(const char *fileName);
-    void truncateFile(const char *fileName);
+    void truncateFile(const char *fileName, int fileIndex);
+    void pointFATStoEOF(size_t first, char * buffer);
 
     int getFATentryOffset(size_t index){
         return (DIR_ENTRIES_MAX * sizeof(FileMetaData)) + sizeof(size_t) + (sizeof(FATentry) *index);
@@ -140,21 +141,24 @@ private:
     int getFirstFreeBlockIndexOffset(){
         return (DIR_ENTRIES_MAX * sizeof(FileMetaData));
     }
+    int getFileMetaDataOffset(int index){
+        return index * sizeof(FileMetaData);
+    }
 };
 
 
 
-bool CFileSystem::existsFile(const char *fileName) const {
+int CFileSystem::findFile(const char *fileName) const {
     char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
     dev.m_Read(0, buffer, numSectorsForMetadata);
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
         FileMetaData fmd;
         memcpy(&fmd, buffer + i* sizeof(FileMetaData),sizeof(FileMetaData));
         if(fmd.valid && strcmp(fmd.name, fileName) == 0){
-            return true;
+            return i;
         }
     }
-    return false;
+    return -1;
 }
 
 void CFileSystem::createFile(const char *fileName) {
@@ -190,13 +194,32 @@ void CFileSystem::createFile(const char *fileName) {
             break;
         }
     }
-    dev.m_Write(0, buffer, numSectorsForMetadata);
+
 }
 
 
+void CFileSystem::truncateFile(const char *fileName, int fileIndex) {
+    char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
+    dev.m_Read(0, buffer, numSectorsForMetadata);
+    FileMetaData fmd;
+    memcpy(&fmd, buffer + getFileMetaDataOffset(fileIndex), sizeof(fmd));
+    pointFATStoEOF(fmd.start, buffer);
+    fmd.size = 0;
+    memcpy(buffer + getFileMetaDataOffset(fileIndex),&fmd,  sizeof(fmd));
+    dev.m_Write(0, buffer, numSectorsForMetadata);
+}
 
-
-
+void CFileSystem::pointFATStoEOF(size_t first, char * buffer) {
+    size_t next = first;
+    FATentry fe;
+    do{
+        memcpy(&fe, buffer + getFATentryOffset(next), sizeof(fe));
+        next = fe.next;
+        fe.next = EOF;
+        fe.free = true;
+        memcpy(buffer + getFATentryOffset(next),&fe, sizeof(fe));
+    } while(next != EOF);
+}
 
 
 
@@ -243,19 +266,19 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
         return -1;
     }
     if(writeMode){
-        if(existsFile(fileName)){
+        int fileIndex = findFile(fileName);
+        if(fileIndex != -1){
             int fd = openExisting(fileName, writeMode);
-            truncateFile(fileName);
+            truncateFile(fileName, fileIndex);
             return fd;
         } else{
             //create
             createFile(fileName);
-
             return openExisting(fileName, writeMode);
         }
 
     } else{
-        if(existsFile(fileName)){
+        if(findFile(fileName) != -1){
             return openExisting(fileName, writeMode);
         } else{
             return -1;
