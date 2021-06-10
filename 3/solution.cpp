@@ -146,11 +146,63 @@ private:
         return index * sizeof(FileMetaData);
     }
     FileMetaData getFileMetaData(const char * fileName, char * buffer);
-    size_t findFileFirstSector(const char * fileName, char * buffer);
     size_t getFirstNeededSectorNum(size_t offset);
     size_t getNumNeededSectors(size_t offset,size_t numToRead );
     FATentry getFATEntryAtIndex(size_t index, char * buffer);
+    size_t getLastUsedSector(size_t first, char * buffer);
+    size_t useFreeSector(char * buffer);
+    void changeFATentry(size_t sector, size_t nextSector, char * buffer);
+    void incrementFileSize(const char * fileName, size_t newSize, char * buffer);
 };
+
+void CFileSystem::incrementFileSize(const char * fileName, size_t newSize, char * buffer){
+    for(int i = 0; i<DIR_ENTRIES_MAX;i++){
+        FileMetaData fmd;
+        memcpy(&fmd, buffer + i* sizeof(FileMetaData),sizeof(FileMetaData));
+        if(fmd.valid && strcmp(fmd.name, fileName) == 0){
+            fmd.size = newSize;
+            memcpy(buffer + i* sizeof(FileMetaData), &fmd, sizeof(FileMetaData));
+            break;
+        }
+    }
+}
+
+
+void CFileSystem::changeFATentry(size_t sector, size_t nextSector, char * buffer){
+    FATentry originalFe;
+    memcpy(&originalFe, buffer + getFATentryOffset(sector), sizeof(FATentry));
+
+    FATentry newFe(nextSector, originalFe.free);        //might be problem with types
+    memcpy(buffer + getFATentryOffset(sector),&newFe, sizeof(FATentry));
+}
+
+size_t CFileSystem::useFreeSector(char * buffer){
+    size_t firstFree;
+    memcpy(&firstFree, buffer + getFirstFreeBlockIndexOffset(), sizeof(size_t));
+    //find next free
+    size_t nextFreeBlock = firstFree+1;
+    while(nextFreeBlock != firstFree){     //might be possibly broken if no blocks are free
+        FATentry nextEntry = getFATEntryAtIndex(nextFreeBlock, buffer);
+        if(nextEntry.free){
+            memcpy(buffer + getFirstFreeBlockIndexOffset(), &nextFreeBlock, sizeof(size_t));
+            break;
+        } else{
+            nextFreeBlock++;
+            nextFreeBlock%maxSectors;
+        }
+    }
+    return firstFree;
+}
+
+size_t CFileSystem::getLastUsedSector(size_t first, char * buffer){
+    FATentry fe = getFATEntryAtIndex(first, buffer);
+    size_t prev = first;
+    while(fe.next != EOF){
+        prev = fe.next;
+        fe = getFATEntryAtIndex(fe.next, buffer);
+    }
+    return prev;
+}
 
 FATentry CFileSystem::getFATEntryAtIndex(size_t index, char * buffer){
     FATentry fe;
@@ -206,26 +258,14 @@ int CFileSystem::findFile(const char *fileName) const {
 void CFileSystem::createFile(const char *fileName) {
     char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
     dev.m_Read(0, buffer, numSectorsForMetadata);
-    //find free sector, put EOF there
-    size_t firstFreeBlock;
-    memcpy(&firstFreeBlock, buffer + getFirstFreeBlockIndexOffset(), sizeof(size_t) );
+
+    //find free sector
+    size_t firstFreeBlock = useFreeSector(buffer);
 
     //write EOF to used sector in FAT
     FATentry fe(EOF, false);
     memcpy(buffer+ getFATentryOffset(firstFreeBlock), &fe, sizeof(fe) );
-    //get another free block and store it to var
-    size_t nextFreeBlock = firstFreeBlock+1;
-    while(nextFreeBlock != firstFreeBlock){     //might be possibly broken if no blocks are free
-        FATentry nextEntry;
-        memcpy(&nextEntry, buffer + getFATentryOffset(nextFreeBlock), sizeof(nextEntry));
-        if(nextEntry.free){
-            memcpy(buffer + getFirstFreeBlockIndexOffset(), &nextFreeBlock, sizeof(size_t));
-            break;
-        } else{
-            nextFreeBlock++;
-            nextFreeBlock%maxSectors;
-        }
-    }
+
     //put entry to FileEntry array
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
         FileMetaData fmd;
@@ -324,8 +364,72 @@ size_t CFileSystem::getFollowingFATEntryIndex(size_t prevSector, char * buffer){
     return fe.next;
 }
 
+size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
+    if(!openFiles[fd].writeMode){
+        return 0;
+    }
+    char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
+    dev.m_Read(0, buffer, numSectorsForMetadata);
+    FileMetaData fmd = getFileMetaData(openFiles[fd].name, buffer);
+    size_t firstNeededSectorNum = getFirstNeededSectorNum(openFiles[fd].offset);
+    size_t numNeededSectors = getNumNeededSectors(openFiles[fd].offset, len);
+
+    size_t * neededSectors = new size_t [numNeededSectors];
+    int startIndex = 0;
+    if(openFiles[fd].offset%SECTOR_SIZE != 0){
+        neededSectors[0] = getLastUsedSector(fmd.start, buffer);
+        startIndex++;
+    }
+    for(int i = startIndex; i<numNeededSectors;i++){
+        //find free sector
+        neededSectors[i] = useFreeSector(buffer);
+    }
+    char * dataC = (char *) data;
+    char sector[SECTOR_SIZE];
+    size_t writePointer = 0;
+    for(int i = 0; i<numNeededSectors;i++){
+        if(numNeededSectors == 1 && openFiles[fd].offset%SECTOR_SIZE != 0){
+            dev.m_Read(neededSectors[i], sector, 1);
+            memcpy(sector + openFiles[fd].offset%SECTOR_SIZE, dataC, len);
+            dev.m_Write(neededSectors[i], sector, 1);
+            //break
+        } else if(i == 0 && openFiles[fd].offset%SECTOR_SIZE != 0){
+            //read sector
+            dev.m_Read(neededSectors[i], sector, 1);
+            size_t numToWrite = SECTOR_SIZE - openFiles[fd].offset%SECTOR_SIZE;
+            memcpy(sector + openFiles[fd].offset%SECTOR_SIZE, dataC, numToWrite);
+            writePointer = numToWrite;
+            dev.m_Write(neededSectors[i], sector, 1);
+        } else if(i == numNeededSectors-1){
+            memcpy(sector, dataC + writePointer, len - writePointer);
+            dev.m_Write(neededSectors[i], sector, 1);
+            //break
+        } else{
+            memcpy(sector, dataC + writePointer, SECTOR_SIZE);
+            dev.m_Write(neededSectors[i], sector, 1);
+        }
+    }
+
+    //change entries in FAT
+    for(int i = 0; i<numNeededSectors;i++){
+        if(i == numNeededSectors-1){
+            changeFATentry(neededSectors[i], EOF, buffer);
+        } else{
+            changeFATentry(neededSectors[i], neededSectors[i+1], buffer);
+        }
+    }
+    //change size
+    incrementFileSize(openFiles[fd].name, len+openFiles[fd].offset, buffer); //for Write files is offset same as size
+
+    //change offset
+    openFiles[fd].offset += len;
+    return len;
+}
 
 size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
+    if(openFiles[fd].writeMode){
+        return 0;
+    }
     char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
     dev.m_Read(0, buffer, numSectorsForMetadata);
     FileMetaData fmd = getFileMetaData(openFiles[fd].name, buffer);
