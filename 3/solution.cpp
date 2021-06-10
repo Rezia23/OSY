@@ -93,7 +93,7 @@ struct openFileEntry{
 };
 class CFileSystem {
 public:
-    CFileSystem(TBlkDev & oldDev) : dev(move(oldDev)){}
+    CFileSystem(TBlkDev oldDev) : dev((oldDev)){}
 
     static bool CreateFs(const TBlkDev &dev);
 
@@ -132,9 +132,10 @@ private:
 
     openFileEntry openFiles[OPEN_FILES_MAX];
     size_t filesOpened = 0;
-    static void writeInfoData(const void * data, size_t len, const TBlkDev & dev, size_t numSectorsUsed){
+    static void writeInfoData(FileSystemInfo & data, size_t len, const TBlkDev & dev, size_t numSectorsUsed){
         char * mem = new char [numSectorsUsed*SECTOR_SIZE];
-        memcpy(mem, (char * )data, len);
+        memset(mem, 0, numSectorsUsed*SECTOR_SIZE);
+        memcpy(mem, &data, len);
         dev.m_Write(0, mem, numSectorsUsed);
     }
     int openExisting(const char * fileName, bool writeMode);
@@ -418,7 +419,7 @@ bool CFileSystem::CreateFs(const TBlkDev &dev) {
         numSectorsForMetadata++;
     }
     fsInfo.useFirstNBlocks(numSectorsForMetadata);
-    writeInfoData(&fsInfo, sizeof(fsInfo), dev, numSectorsForMetadata);
+    writeInfoData(fsInfo, sizeof(fsInfo), dev, numSectorsForMetadata);
     return true;
 }
 
