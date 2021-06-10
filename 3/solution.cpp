@@ -105,7 +105,13 @@ public:
 
     int OpenFile(const char *fileName, bool writeMode);
 
-    bool CloseFile(int fd);
+    bool CloseFile(int fd) {
+        if(!openFiles[fd].isValid){
+            return false;
+        }
+        openFiles[fd].isValid = false;
+        return true;
+    }
 
     size_t ReadFile(int fd, void *data, size_t len);
 
@@ -118,6 +124,7 @@ public:
     bool FindNext(TFile &file);
 
 private:
+    int iterator = 0;
     static int sizeOfMetaData;
     TBlkDev dev;
     static size_t maxSectors;
@@ -130,7 +137,7 @@ private:
         dev.m_Write(0, mem, numSectorsUsed);
     }
     int openExisting(const char * fileName, bool writeMode);
-    int findFile(const char *fileName) const;
+    int findFile(const char *fileName, const char * buffer) const;
     void createFile(const char *fileName);
     void truncateFile(const char *fileName, int fileIndex);
     void pointFATStoEOF(size_t first, char * buffer);
@@ -153,7 +160,58 @@ private:
     size_t useFreeSector(char * buffer);
     void changeFATentry(size_t sector, size_t nextSector, char * buffer);
     void incrementFileSize(const char * fileName, size_t newSize, char * buffer);
+    FileMetaData getFileMetaDataAtIndex(int it, const char *buffer);
 };
+
+FileMetaData CFileSystem::getFileMetaDataAtIndex(int it, const char *buffer){
+    FileMetaData fmd;
+    memcpy(&fmd, buffer + getFileMetaDataOffset(it), sizeof(fmd));
+    return fmd;
+}
+
+size_t CFileSystem:: FileSize(const char *fileName){
+    char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
+    dev.m_Read(0, buffer, numSectorsForMetadata);
+    int file = findFile(fileName, buffer);
+    if(file == -1){
+        return SIZE_MAX;
+    }
+    FileMetaData fmd = getFileMetaData(fileName, buffer);
+    return fmd.size;
+}
+bool CFileSystem::FindNext(TFile &file){
+    int originIterator = iterator;
+    char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
+    dev.m_Read(0, buffer, numSectorsForMetadata);
+    FileMetaData fmd = getFileMetaDataAtIndex(iterator, buffer);
+    while(!fmd.valid){
+        iterator++;
+        iterator = iterator %DIR_ENTRIES_MAX;
+        if(iterator == originIterator){
+            return false;
+        }
+        fmd = getFileMetaDataAtIndex(iterator, buffer);
+    }
+    iterator++;
+    file.m_FileSize = fmd.size;
+    strcpy(file.m_FileName , fmd.name);
+    return true;
+
+}
+
+bool CFileSystem::FindFirst(TFile &file){
+    char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
+    dev.m_Read(0, buffer, numSectorsForMetadata);
+    for(int i = 0; i<DIR_ENTRIES_MAX;i++){
+        FileMetaData fmd = getFileMetaDataAtIndex(i, buffer);
+        if(fmd.valid){
+            strcpy(file.m_FileName, fmd.name);
+            file.m_FileSize = fmd.size;
+            return true;
+        }
+    }
+    return false;
+}
 
 void CFileSystem::incrementFileSize(const char * fileName, size_t newSize, char * buffer){
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
@@ -233,8 +291,7 @@ size_t CFileSystem::getFirstNeededSectorNum(size_t offset){
 
 FileMetaData  CFileSystem::getFileMetaData(const char * fileName, char * buffer){
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
-        FileMetaData fmd;
-        memcpy(&fmd, buffer + i* sizeof(FileMetaData),sizeof(FileMetaData));
+        FileMetaData fmd = getFileMetaDataAtIndex(i, buffer);
         if(fmd.valid && strcmp(fmd.name, fileName) == 0){
             return fmd;
         }
@@ -242,9 +299,8 @@ FileMetaData  CFileSystem::getFileMetaData(const char * fileName, char * buffer)
     return {};  //should not happen
 }
 
-int CFileSystem::findFile(const char *fileName) const {
-    char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
-    dev.m_Read(0, buffer, numSectorsForMetadata);
+int CFileSystem::findFile(const char *fileName, const char * buffer) const {
+
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
         FileMetaData fmd;
         memcpy(&fmd, buffer + i* sizeof(FileMetaData),sizeof(FileMetaData));
@@ -341,7 +397,9 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
         return -1;
     }
     if(writeMode){
-        int fileIndex = findFile(fileName);
+        char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
+        dev.m_Read(0, buffer, numSectorsForMetadata);
+        int fileIndex = findFile(fileName, buffer);
         if(fileIndex != -1){
             int fd = openExisting(fileName, writeMode);
             truncateFile(fileName, fileIndex);
@@ -352,7 +410,9 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
             return openExisting(fileName, writeMode);
         }
     } else{
-        if(findFile(fileName) != -1){
+        char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
+        dev.m_Read(0, buffer, numSectorsForMetadata);
+        if(findFile(fileName, buffer) != -1){
             return openExisting(fileName, writeMode);
         } else{
             return -1;
