@@ -46,7 +46,7 @@ struct FileMetaData{
     size_t start;
     bool valid = false;
     FileMetaData(){
-        memset(name, 0, sizeof name);
+        memset(name, 0, sizeof (name));
         size = 0;
         start = 0;
     }
@@ -135,8 +135,12 @@ private:
     static void writeInfoData(FileSystemInfo & data, size_t len, const TBlkDev & dev, size_t numSectorsUsed){
         char * mem = new char [numSectorsUsed*SECTOR_SIZE];
         memset(mem, 0, numSectorsUsed*SECTOR_SIZE);
-        memcpy(mem, &data, len);
-        dev.m_Write(0, mem, numSectorsUsed);
+        //copy static stuff
+        memcpy(mem, data.fileMetaData, sizeof(FileMetaData)*DIR_ENTRIES_MAX);
+        memcpy(mem + sizeof(FileMetaData)*DIR_ENTRIES_MAX, &data.firstFreeBlock, sizeof(size_t));
+        //copy FAT entries
+        memcpy(mem+sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t), data.FAT, sizeof(FATentry)*maxSectors);
+        size_t sec = dev.m_Write(0, mem, numSectorsUsed);
     }
     int openExisting(const char * fileName, bool writeMode);
     int findFile(const char *fileName, const char * buffer) const;
@@ -410,16 +414,18 @@ void CFileSystem::pointFATStoEOF(size_t first, char * buffer) {
 
 
 
+//TODO check if reading right sizes
 bool CFileSystem::CreateFs(const TBlkDev &dev) {
     maxSectors = dev.m_Sectors;
     FileSystemInfo fsInfo(dev.m_Sectors);
-    sizeOfMetaData = sizeof(fsInfo);
+    sizeOfMetaData = sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t) + sizeof(FATentry)*maxSectors;
     numSectorsForMetadata = sizeOfMetaData/SECTOR_SIZE;
     if(sizeOfMetaData%SECTOR_SIZE != 0){
         numSectorsForMetadata++;
     }
     fsInfo.useFirstNBlocks(numSectorsForMetadata);
     writeInfoData(fsInfo, sizeof(fsInfo), dev, numSectorsForMetadata);
+    //printf("whole info %d\n filemetadata %d\n size_t %d\n FATentry %d\n", sizeof(fsInfo), sizeof(FileMetaData), sizeof(size_t), sizeof(FATentry));
     return true;
 }
 
