@@ -73,9 +73,8 @@ struct FileSystemInfo{
     FileSystemInfo(size_t numSectors){
         FAT = new FATentry [numSectors];
         for(int i = 0; i<numSectors;i++){
-            FAT[i].next = i+1;
+            FAT[i].next = EOF;
         }
-        FAT[numSectors-1].next = EOF;
         firstFreeBlock = 0;
     }
     void useFirstNBlocks(size_t n){
@@ -135,6 +134,7 @@ private:
     void createFile(const char *fileName);
     void truncateFile(const char *fileName, int fileIndex);
     void pointFATStoEOF(size_t first, char * buffer);
+    size_t getFollowingFATEntryIndex(size_t prevSector, char * buffer);
 
     int getFATentryOffset(size_t index){
         return (DIR_ENTRIES_MAX * sizeof(FileMetaData)) + sizeof(size_t) + (sizeof(FATentry) *index);
@@ -145,9 +145,50 @@ private:
     int getFileMetaDataOffset(int index){
         return index * sizeof(FileMetaData);
     }
+    FileMetaData getFileMetaData(const char * fileName, char * buffer);
+    size_t findFileFirstSector(const char * fileName, char * buffer);
+    size_t getFirstNeededSectorNum(size_t offset);
+    size_t getNumNeededSectors(size_t offset,size_t numToRead );
+    FATentry getFATEntryAtIndex(size_t index, char * buffer);
 };
 
+FATentry CFileSystem::getFATEntryAtIndex(size_t index, char * buffer){
+    FATentry fe;
+    memcpy(&fe, buffer + getFATentryOffset(index), sizeof(FATentry));
+    return fe;
+}
 
+size_t CFileSystem::getNumNeededSectors(size_t offset,size_t numToRead ){
+    size_t numNeededSectors = (offset%SECTOR_SIZE + numToRead)/SECTOR_SIZE;
+    if((offset%SECTOR_SIZE + numToRead)%SECTOR_SIZE!= 0){
+        numNeededSectors++;
+    }
+    return numNeededSectors;
+}
+
+size_t CFileSystem::getFirstNeededSectorNum(size_t offset){
+    if(offset == 0){
+        return 0;
+    } else{
+        size_t firstNeededSectorNum = offset/SECTOR_SIZE;
+        if(offset % SECTOR_SIZE != 0){
+            firstNeededSectorNum++;
+        }
+        return firstNeededSectorNum-1;
+    }
+}
+
+
+FileMetaData  CFileSystem::getFileMetaData(const char * fileName, char * buffer){
+    for(int i = 0; i<DIR_ENTRIES_MAX;i++){
+        FileMetaData fmd;
+        memcpy(&fmd, buffer + i* sizeof(FileMetaData),sizeof(FileMetaData));
+        if(fmd.valid && strcmp(fmd.name, fileName) == 0){
+            return fmd;
+        }
+    }
+    return {};  //should not happen
+}
 
 int CFileSystem::findFile(const char *fileName) const {
     char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
@@ -214,7 +255,7 @@ void CFileSystem::pointFATStoEOF(size_t first, char * buffer) {
     size_t next = first;
     FATentry fe;
     do{
-        memcpy(&fe, buffer + getFATentryOffset(next), sizeof(fe));
+        fe = getFATEntryAtIndex(next, buffer);
         next = fe.next;
         fe.next = EOF;
         fe.free = true;
@@ -278,22 +319,58 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
         }
     }
 }
+size_t CFileSystem::getFollowingFATEntryIndex(size_t prevSector, char * buffer){
+    FATentry fe = getFATEntryAtIndex(prevSector, buffer);
+    return fe.next;
+}
+
 
 size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
-    size_t firstNeededSectorOrder = openFiles[fd].offset/SECTOR_SIZE;
-    if(openFiles[fd].offset%SECTOR_SIZE!=0){
-        firstNeededSectorOrder++;
-    }
-    size_t numNeededSectors = (openFiles[fd].offset%SECTOR_SIZE + len)/SECTOR_SIZE;
-    if((openFiles[fd].offset%SECTOR_SIZE + len)%SECTOR_SIZE!= 0){
-        numNeededSectors++;
-    }
-    //todo find needed sector nums in FAT
+    char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
+    dev.m_Read(0, buffer, numSectorsForMetadata);
+    FileMetaData fmd = getFileMetaData(openFiles[fd].name, buffer);
 
-    //todo copy sectors to *data
+    size_t numToActuallyRead = len;
+    if(len+openFiles[fd].offset > fmd.size){
+        numToActuallyRead = fmd.size-openFiles[fd].offset;
+    }
 
-    //increase offset
-    return 0;
+    size_t firstNeededSectorNum = getFirstNeededSectorNum(openFiles[fd].offset);
+
+    size_t numNeededSectors = getNumNeededSectors(openFiles[fd].offset, numToActuallyRead);
+
+    size_t * neededSectors = new size_t [numNeededSectors];
+    size_t nextSector = fmd.start;
+
+    for(int i = 0; i<firstNeededSectorNum+numNeededSectors;i++){
+        if(i>=firstNeededSectorNum){
+            neededSectors[i-firstNeededSectorNum] = nextSector;
+        }
+        nextSector = getFollowingFATEntryIndex(nextSector, buffer);
+    }
+
+    char * output  = new char [numToActuallyRead];
+    char sector [SECTOR_SIZE];
+    size_t outputPointer = 0;
+    for(int i = 0; i<numNeededSectors;i++){
+        dev.m_Read(neededSectors[i],sector ,1);
+        if(numNeededSectors == 1){
+            memcpy(output, sector + openFiles[fd].offset%SECTOR_SIZE, numToActuallyRead);
+            //break
+        } else if(i == 0){
+            memcpy(output, sector + openFiles[fd].offset%SECTOR_SIZE, SECTOR_SIZE - (openFiles[fd].offset%SECTOR_SIZE));
+            outputPointer = SECTOR_SIZE - (openFiles[fd].offset%SECTOR_SIZE);
+        } else if(i == numNeededSectors-1){
+            memcpy(output + outputPointer, sector, numToActuallyRead-outputPointer);
+            //break
+        } else{
+            memcpy(output + outputPointer, sector, SECTOR_SIZE);
+            outputPointer += SECTOR_SIZE;
+        }
+    }
+    memcpy(data, output, numToActuallyRead);
+    openFiles[fd].offset+= numToActuallyRead;
+    return numToActuallyRead;
 }
 
 
