@@ -125,10 +125,11 @@ public:
 
 private:
     int iterator = 0;
-    static int sizeOfMetaData;
     TBlkDev dev;
+    static int sizeOfMetaData;
     static size_t maxSectors;
     static size_t numSectorsForMetadata;
+
     openFileEntry openFiles[OPEN_FILES_MAX];
     size_t filesOpened = 0;
     static void writeInfoData(const void * data, size_t len, const TBlkDev & dev, size_t numSectorsUsed){
@@ -162,6 +163,53 @@ private:
     void incrementFileSize(const char * fileName, size_t newSize, char * buffer);
     FileMetaData getFileMetaDataAtIndex(int it, const char *buffer);
 };
+
+int CFileSystem::sizeOfMetaData = 0;
+size_t CFileSystem:: maxSectors = 0;
+size_t CFileSystem::numSectorsForMetadata = 0;
+
+
+bool CFileSystem::Umount(void){
+    for(int i = 0; i<OPEN_FILES_MAX;i++){
+        if(openFiles[i].isValid){
+            CloseFile(i);
+        }
+    }
+    return true;
+}
+
+bool CFileSystem::DeleteFile(const char *fileName){
+    char * buffer = new char [numSectorsForMetadata * SECTOR_SIZE];
+    dev.m_Read(0, buffer, numSectorsForMetadata);
+    int index = findFile(fileName, buffer);
+    if(index == -1){
+        return false;
+    }
+    FileMetaData fmd = getFileMetaDataAtIndex(index, buffer);
+    size_t FATindex = fmd.start;
+
+    //write fmd as invalid
+    fmd.valid = false;
+    memcpy(buffer + getFileMetaDataOffset(index), &fmd, sizeof(fmd));
+    //delete FATs
+    size_t current = FATindex;
+    FATentry fe;
+    size_t prev;
+
+    while(true){
+        fe = getFATEntryAtIndex(current, buffer);
+        if(fe.next == EOF){
+            break;
+        }
+        prev = current;
+        current = fe.next;
+        FATentry newFe(EOF, false);
+        memcpy(&buffer + getFATentryOffset(prev),&newFe, sizeof(FATentry) );
+    }
+    //write buffer
+    dev.m_Write(0, buffer, numSectorsForMetadata);
+    return true;
+}
 
 FileMetaData CFileSystem::getFileMetaDataAtIndex(int it, const char *buffer){
     FileMetaData fmd;
