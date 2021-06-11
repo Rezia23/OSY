@@ -73,7 +73,7 @@ struct FileSystemInfo{
     FATentry * FAT;
     FileSystemInfo(size_t numSectors){
         FAT = new FATentry [numSectors];
-        for(int i = 0; i<numSectors;i++){
+        for(size_t i = 0; i<numSectors;i++){
             FAT[i].next = EOF;
         }
         firstFreeBlock = 0;
@@ -82,7 +82,7 @@ struct FileSystemInfo{
         delete [] FAT;
     }
     void useFirstNBlocks(size_t n){
-        for(int i = 0; i<n;i++){
+        for(size_t i = 0; i<n;i++){
             FAT[i].next= EOF;
             FAT[i].free = false;
         }
@@ -159,7 +159,7 @@ private:
 
         //copy FAT entries
         memcpy(mem+sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t), data.FAT, sizeof(FATentry)*maxSectors);
-        size_t sec = dev.m_Write(0, mem, numSectorsUsed);
+        dev.m_Write(0, mem, numSectorsUsed);
 
         delete [] mem;
     }
@@ -303,7 +303,7 @@ size_t CFileSystem::useFreeSector(){
             break;
         } else{
             nextFreeBlock++;
-            nextFreeBlock%maxSectors;
+            nextFreeBlock%=maxSectors;
         }
     }
     return firstFree;
@@ -400,7 +400,7 @@ void CFileSystem::truncateFile(const char *fileName, int fileIndex) {
 }
 
 void CFileSystem::pointFATStoEOF(size_t first) {
-    size_t next = first;
+    int next = (int)first;
     FATentry fe;
     do{
         fe = getFATEntryAtIndex(next);
@@ -479,7 +479,6 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
         return 0;
     }
     FileMetaData fmd = getFileMetaData(openFiles[fd].name);
-    size_t firstNeededSectorNum = getFirstNeededSectorNum(openFiles[fd].offset);
     size_t numNeededSectors = getNumNeededSectors(openFiles[fd].offset, len);
 
 
@@ -489,7 +488,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
         neededSectors[0] = getLastUsedSector(fmd.start);
         startIndex++;
     }
-    for(int i = startIndex; i<numNeededSectors;i++){
+    for(size_t i = startIndex; i<numNeededSectors;i++){
         //find free sector
         neededSectors[i] = useFreeSector();
     }
@@ -497,7 +496,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
     char * dataC = (char *) data;
     char sector[SECTOR_SIZE];
     size_t writePointer = 0;
-    for(int i = 0; i<numNeededSectors;i++){
+    for(size_t i = 0; i<numNeededSectors;i++){
         if(numNeededSectors == 1 && openFiles[fd].offset%SECTOR_SIZE != 0){
             dev.m_Read(neededSectors[i], sector, 1);
             memcpy(sector + openFiles[fd].offset%SECTOR_SIZE, dataC, len);
@@ -523,7 +522,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
     }
 
     //change entries in FAT
-    for(int i = 0; i<numNeededSectors;i++){
+    for(size_t i = 0; i<numNeededSectors;i++){
         if(i == numNeededSectors-1){
             changeFATentry(neededSectors[i], EOF);
         } else{
@@ -557,7 +556,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
     size_t * neededSectors = new size_t [numNeededSectors];
     size_t nextSector = fmd.start;
 
-    for(int i = 0; i<firstNeededSectorNum+numNeededSectors;i++){
+    for(size_t i = 0; i<firstNeededSectorNum+numNeededSectors;i++){
         if(i>=firstNeededSectorNum){
             neededSectors[i-firstNeededSectorNum] = nextSector;
         }
@@ -567,7 +566,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
     char * output  = new char [numToActuallyRead];
     char sector [SECTOR_SIZE];
     size_t outputPointer = 0;
-    for(int i = 0; i<numNeededSectors;i++){
+    for(size_t i = 0; i<numNeededSectors;i++){
         dev.m_Read(neededSectors[i],sector ,1);
         if(numNeededSectors == 1){
             memcpy(output, sector + openFiles[fd].offset%SECTOR_SIZE, numToActuallyRead);
