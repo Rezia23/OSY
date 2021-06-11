@@ -108,13 +108,13 @@ public:
         metadata = new char [numSectorsForMetadata*SECTOR_SIZE];
         memset(metadata, 0, numSectorsForMetadata*SECTOR_SIZE);
         dev.m_Read(0, metadata, numSectorsForMetadata);
-        printf("rozbije se to uz tady\n");
-        FileMetaData fmd = getFileMetaDataAtIndex(0);
-        if(fmd.valid){
-            printf("valid");
-        }else{
-            printf("invalid");
-        }
+//        printf("rozbije se to uz tady\n");
+//        FileMetaData fmd = getFileMetaDataAtIndex(0);
+//        if(fmd.valid){
+//            printf("valid");
+//        }else{
+//            printf("invalid");
+//        }
     }
 
     static bool CreateFs(const TBlkDev &dev);
@@ -128,14 +128,13 @@ public:
             }
         }
 
-        FileMetaData fmdOrigin = getFileMetaDataAtIndex(0);
+
 
         dev.m_Write(0, metadata, numSectorsForMetadata);
 
         //debug
         dev.m_Read(0, metadata, numSectorsForMetadata);
-        FileMetaData fmdNew = getFileMetaDataAtIndex(0);
-//        printf("%s\n", fmdNew.name);
+
 
         delete [] metadata;
         return true;
@@ -266,13 +265,14 @@ size_t CFileSystem:: FileSize(const char *fileName){
     return fmd.size;
 }
 bool CFileSystem::FindNext(TFile &file){
-    int originIterator = iterator;
+    if(iterator >=DIR_ENTRIES_MAX){
+        return false;
+    }
     FileMetaData fmd = getFileMetaDataAtIndex(iterator);
     while(!fmd.valid){
 
         iterator++;
-        iterator = iterator %DIR_ENTRIES_MAX;
-        if(iterator == originIterator){
+        if(iterator >=DIR_ENTRIES_MAX){
             return false;
         }
         fmd = getFileMetaDataAtIndex(iterator);
@@ -289,7 +289,7 @@ bool CFileSystem::FindFirst(TFile &file){
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
         FileMetaData fmd = getFileMetaDataAtIndex(i);
         if(fmd.valid){
-            printf("%s\n",file.m_FileName);
+//            printf("%s\n",file.m_FileName);
             strcpy(file.m_FileName, fmd.name);
             file.m_FileSize = fmd.size;
             return true;
@@ -466,6 +466,7 @@ int CFileSystem::openExisting(const char * fileName, bool writeMode){
     for(int i = 0; i<OPEN_FILES_MAX;i++){
         if(!openFiles[i].isValid){
             openFiles[i].isValid = true;
+            openFiles[i].offset = 0;
             openFiles[i].writeMode = writeMode;
             strcpy(openFiles[i].name, fileName);
             filesOpened++;
@@ -623,6 +624,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
     memcpy(data, output, numToActuallyRead);
     openFiles[fd].offset+= numToActuallyRead;
     delete [] neededSectors;
+    delete [] output;
     return numToActuallyRead;
 }
 
