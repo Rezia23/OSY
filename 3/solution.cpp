@@ -98,6 +98,13 @@ struct openFileEntry{
 class CFileSystem {
 public:
     CFileSystem(TBlkDev oldDev) : dev((oldDev)){
+        maxSectors = dev.m_Sectors;
+        sizeOfMetaData = sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t) + sizeof(FATentry)*maxSectors;
+        numSectorsForMetadata = sizeOfMetaData/SECTOR_SIZE;
+        if(sizeOfMetaData%SECTOR_SIZE != 0){
+            numSectorsForMetadata++;
+        }
+
         metadata = new char [numSectorsForMetadata*SECTOR_SIZE];
         memset(metadata, 0, numSectorsForMetadata*SECTOR_SIZE);
         dev.m_Read(0, metadata, numSectorsForMetadata);
@@ -128,6 +135,7 @@ public:
         //debug
         dev.m_Read(0, metadata, numSectorsForMetadata);
         FileMetaData fmdNew = getFileMetaDataAtIndex(0);
+//        printf("%s\n", fmdNew.name);
 
         delete [] metadata;
         return true;
@@ -243,8 +251,8 @@ bool CFileSystem::DeleteFile(const char *fileName){
 
 FileMetaData CFileSystem::getFileMetaDataAtIndex(int it){
     FileMetaData fmd;
-    printf("index is %d\n", it);
-    printf("fmd offset is %d \n", getFileMetaDataOffset(0));
+//    printf("index is %d\n", it);
+//    printf("fmd offset is %d \n", getFileMetaDataOffset(0));
     memcpy(&fmd, metadata + getFileMetaDataOffset(it), sizeof(FileMetaData));
     return fmd;
 }
@@ -261,6 +269,7 @@ bool CFileSystem::FindNext(TFile &file){
     int originIterator = iterator;
     FileMetaData fmd = getFileMetaDataAtIndex(iterator);
     while(!fmd.valid){
+
         iterator++;
         iterator = iterator %DIR_ENTRIES_MAX;
         if(iterator == originIterator){
@@ -276,9 +285,11 @@ bool CFileSystem::FindNext(TFile &file){
 }
 
 bool CFileSystem::FindFirst(TFile &file){
+
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
         FileMetaData fmd = getFileMetaDataAtIndex(i);
         if(fmd.valid){
+            printf("%s\n",file.m_FileName);
             strcpy(file.m_FileName, fmd.name);
             file.m_FileSize = fmd.size;
             return true;
