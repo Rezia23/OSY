@@ -290,7 +290,7 @@ void CFileSystem::changeFATentry(size_t sector, size_t nextSector){
     memcpy(metadata + getFATentryOffset(sector),&newFe, sizeof(FATentry));
 }
 
-//does not work but why
+
 size_t CFileSystem::useFreeSector(){
     size_t firstFree;
     memcpy(&firstFree, metadata + getFirstFreeBlockIndexOffset(), sizeof(size_t));
@@ -413,7 +413,7 @@ void CFileSystem::pointFATStoEOF(size_t first) {
 
 
 
-//TODO check if reading right sizes and not sizes of pointers
+
 bool CFileSystem::CreateFs(const TBlkDev &dev) {
     maxSectors = dev.m_Sectors;
     FileSystemInfo fsInfo(dev.m_Sectors);
@@ -459,6 +459,14 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
         } else{
             //create
             createFile(fileName);
+
+            ///debug
+//            for(int i = 0; i<DIR_ENTRIES_MAX;i++){
+//                FileMetaData fmd;
+//                fmd = getFileMetaDataAtIndex(i);
+//                printf("reee");
+//            }
+
             return openExisting(fileName, writeMode);
         }
     } else{
@@ -484,7 +492,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
 
     size_t * neededSectors = new size_t [numNeededSectors];
     int startIndex = 0;
-    if(openFiles[fd].offset%SECTOR_SIZE != 0){
+    if(openFiles[fd].offset%SECTOR_SIZE != 0 || fmd.size == 0 ){
         neededSectors[0] = getLastUsedSector(fmd.start);
         startIndex++;
     }
