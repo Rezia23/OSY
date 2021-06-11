@@ -98,8 +98,16 @@ struct openFileEntry{
 class CFileSystem {
 public:
     CFileSystem(TBlkDev oldDev) : dev((oldDev)){
-        metadata = new char [sizeOfMetaData];
+        metadata = new char [numSectorsForMetadata*SECTOR_SIZE];
+        memset(metadata, 0, numSectorsForMetadata*SECTOR_SIZE);
         dev.m_Read(0, metadata, numSectorsForMetadata);
+        printf("rozbije se to uz tady\n");
+        FileMetaData fmd = getFileMetaDataAtIndex(0);
+        if(fmd.valid){
+            printf("valid");
+        }else{
+            printf("invalid");
+        }
     }
 
     static bool CreateFs(const TBlkDev &dev);
@@ -112,7 +120,15 @@ public:
                 CloseFile(i);
             }
         }
-        dev.m_Write(0, metadata, sizeOfMetaData);
+
+        FileMetaData fmdOrigin = getFileMetaDataAtIndex(0);
+
+        dev.m_Write(0, metadata, numSectorsForMetadata);
+
+        //debug
+        dev.m_Read(0, metadata, numSectorsForMetadata);
+        FileMetaData fmdNew = getFileMetaDataAtIndex(0);
+
         delete [] metadata;
         return true;
     }
@@ -227,6 +243,8 @@ bool CFileSystem::DeleteFile(const char *fileName){
 
 FileMetaData CFileSystem::getFileMetaDataAtIndex(int it){
     FileMetaData fmd;
+    printf("index is %d\n", it);
+    printf("fmd offset is %d \n", getFileMetaDataOffset(0));
     memcpy(&fmd, metadata + getFileMetaDataOffset(it), sizeof(FileMetaData));
     return fmd;
 }
@@ -505,6 +523,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
     char sector[SECTOR_SIZE];
     size_t writePointer = 0;
     for(size_t i = 0; i<numNeededSectors;i++){
+        //printf("Writing to sector %zu \n", neededSectors[i]);
         if(numNeededSectors == 1 && openFiles[fd].offset%SECTOR_SIZE != 0){
             dev.m_Read(neededSectors[i], sector, 1);
             memcpy(sector + openFiles[fd].offset%SECTOR_SIZE, dataC, len);
