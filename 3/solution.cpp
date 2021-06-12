@@ -229,6 +229,11 @@ bool CFileSystem::DeleteFile(const char *fileName){
     if(index == -1){
         return false;
     }
+//    for(size_t i = 0; i<OPEN_FILES_MAX;i++){
+//        if(openFiles[i].isValid && strncmp(openFiles[i].name, fileName, FILENAME_LEN_MAX)==0){
+//            CloseFile(i);
+//        }
+//    }
     FileMetaData fmd = getFileMetaDataAtIndex(index);
     size_t FATindex = fmd.start;
 
@@ -469,7 +474,7 @@ void CFileSystem::pointFATStoEOF(size_t first) {
         fe = getFATEntryAtIndex(next);
     }
     //set the last entry as invalid
-    fe.free = false;
+    fe.free = true;
     memcpy(metadata + getFATentryOffset(prev), &fe, sizeof(FATentry));
     freeSectors++;
 }
@@ -558,7 +563,7 @@ size_t CFileSystem::getFollowingFATEntryIndex(size_t prevSector){
 }
 
 size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
-    if(!openFiles[fd].writeMode || len == 0){
+    if(!openFiles[fd].writeMode || len == 0 || !openFiles[fd].isValid){
         return 0;
     }
     FileMetaData fmd = getFileMetaData(openFiles[fd].name);
@@ -585,6 +590,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
             dev.m_Read(neededSectors[i], sector, 1);
             memcpy(sector + openFiles[fd].offset%SECTOR_SIZE, dataC, len);
             dev.m_Write(neededSectors[i], sector, 1);
+            writePointer += len;
             //break
         } else if(i == 0 && openFiles[fd].offset%SECTOR_SIZE != 0){
             //read sector
@@ -597,6 +603,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
             memset(sector,0,SECTOR_SIZE);
             memcpy(sector, dataC + writePointer, len - writePointer);
             dev.m_Write(neededSectors[i], sector, 1);
+            writePointer += len-writePointer;
             //break
         } else{
             memcpy(sector, dataC + writePointer, SECTOR_SIZE);
@@ -618,9 +625,8 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
 
     //change offset
     openFiles[fd].offset += len;
-    freeSectors+=numNeededSectors;
     delete [] neededSectors;
-    return len;
+    return writePointer;
 }
 
 size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
@@ -655,12 +661,14 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
         dev.m_Read(neededSectors[i],sector ,1);
         if(numNeededSectors == 1){
             memcpy(output, sector + openFiles[fd].offset%SECTOR_SIZE, numToActuallyRead);
+            outputPointer+=numToActuallyRead;
             //break
         } else if(i == 0){
             memcpy(output, sector + openFiles[fd].offset%SECTOR_SIZE, SECTOR_SIZE - (openFiles[fd].offset%SECTOR_SIZE));
             outputPointer = SECTOR_SIZE - (openFiles[fd].offset%SECTOR_SIZE);
         } else if(i == numNeededSectors-1){
             memcpy(output + outputPointer, sector, numToActuallyRead-outputPointer);
+            outputPointer += numToActuallyRead-outputPointer;
             //break
         } else{
             memcpy(output + outputPointer, sector, SECTOR_SIZE);
@@ -671,7 +679,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
     openFiles[fd].offset+= numToActuallyRead;
     delete [] neededSectors;
     delete [] output;
-    return numToActuallyRead;
+    return outputPointer;
 }
 
 

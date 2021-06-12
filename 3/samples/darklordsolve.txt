@@ -1,0 +1,69 @@
+
+
+
++----------------------------------------------------------------+
+!                                                                !
+!                         Walkthrough for                        !
+!                                                                !
+!                        D A R K   L O R D                       !
+!                                                                !
+!                     Written by Green Hornet                    !
+!                                                                !
+!                          Oct. 19, 1987                         !
+!                                                                !
++----------------------------------------------------------------+
+
+
+        First  off,  the  difference  between  the versions of the
+games  are:  'E'asy  verion & 'N'ormal version, these are basicaly
+the  same but the items are harder to find and in different places
+in the normal version.  This walkthrough is for the 'E'asy version
+of the game.
+
+
+Words in paranthesis (Example: [Look Ground]) are optional.
+
+Go mirror  /  [Look Ground] / Get Scarab / N / [Ask Man] / Say Yes
+Get Stick  /  [Look Stick] / W / E / N / [Look Ground] / Get Flask
+Fill Flask  / W / Get Fish / W / N / N / N / N / N / W / [Ask Man]
+Give Fish  /  Get Scroll / E / E / S / [Look Ground] / Get All / W
+S  /  S  / S / S / S / S / Tie Rope To Tree / D / D / W / W / Give
+Stick To Krin  /  E  /  E  /  E  / U / S / W / W / W / [Look Tree]
+[Look Ground]  / Get Blossom / E / E / E / N / D / D / W / W / Ask
+Krin  / Eat Blossom / Ask Krin / E / E / E / U / E / [Look Ground]
+Get All  /  N / E / N / W / Get Fish / W / N / N / N / N / N / Fly
+N  /  N  /  N  /  N / D / (Here you need to have a little speed so
+after  you  put the scarab in the hole you have to go north before
+the  stone  door  closes.   If you blow it then get the scarab and
+try  it  again.   You  may  want to save the game and just restore
+the  game  if  you blow it.) Put Scarab In Hole / N / N / Give Cat
+Fish  /  [Look Ground]  /  Get Skull  /  W / [Look Ground] / [Look
+Coffin]  /  Get Amulet  / [Look Behind Coffin] / Move Rock / W / U
+Fly  /  S  /  S  / S / S / S / S / S / S / S / W / W / N / N / Fly
+[Look Ground]  / Get Axe / Fly / E / E / S / S / S / S / S / S / S
+S  / W / W / W / W / W / [Read Message] / S / W / S / W / N / Burn
+Plant with Lamp  /  W  / W / N / [Look Lava] / Get Leaf / N / (You
+need  to  have  some  speed again so I sugest you save the game in
+case  you  blow  it.   You are going to pour the water on the lava
+and  then  go  west  right after you do it - QUICK.) Pour Water on
+Lava  /  W  / W / Rub Leaf on Body / W / W / [Look Monster] / Chop
+Monster with Axe (ahhhh...)  /  E  / E / E / S / S / E / E / N / N
+E  / E / S / E / E / E / E / E / N / N / N / N / N / W / W / W / S
+[Look Wall]  /  Go Hole / W / W / W / W / N / N / N / [Look Guard]
+Rub Amulet  /  Get Key  /  [Read Scroll] / Open Door / [Look Wall]
+[Look Torch]  /  Pull Torch  / W / W / [Look Wall] / Open Door / N
+[Look Wall]  /  [Look Lattice]  /  [Look Rat] / Put Rat in Lattice
+(Watch the little guy)  /  S / E / N / W / [Look Pedestal] / [Look
+Crystal]  /  Get Crystal  /  E  / Open Door / E / N / N / N / Open
+Door / [Look Evil] / [Ask] / [Ask] / Throw Skull on Evil
+
+And the people are free!  Have Fun...
+
+
+Cornerstone (9600 Baud) ........................... [714] 962-3222
+The Fishin' Hole (9600 Baud) ...................... [804] 737-2432
+
+
+
+(>
+
