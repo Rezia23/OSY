@@ -51,7 +51,8 @@ struct FileMetaData{
         start = 0;
     }
     FileMetaData(const char * fn, size_t _size, size_t _start, bool _valid){
-        strcpy(name, fn);
+        strncpy(name, fn, FILENAME_LEN_MAX);
+        name[FILENAME_LEN_MAX] = 0;
         size = _size;
         start = _start;
         valid = _valid;
@@ -97,6 +98,9 @@ struct openFileEntry{
 };
 class CFileSystem {
 public:
+    size_t FreeSectorsCount(){
+        return freeSectors;
+    }
     CFileSystem(TBlkDev oldDev) : dev((oldDev)){
         maxSectors = dev.m_Sectors;
         sizeOfMetaData = sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t) + sizeof(FATentry)*maxSectors;
@@ -104,7 +108,7 @@ public:
         if(sizeOfMetaData%SECTOR_SIZE != 0){
             numSectorsForMetadata++;
         }
-
+        freeSectors = maxSectors - numSectorsForMetadata;
         metadata = new char [numSectorsForMetadata*SECTOR_SIZE];
         memset(metadata, 0, numSectorsForMetadata*SECTOR_SIZE);
         dev.m_Read(0, metadata, numSectorsForMetadata);
@@ -164,6 +168,7 @@ public:
     bool FindNext(TFile &file);
 
 private:
+    size_t freeSectors;
     char * metadata;
     int iterator = 0;
     TBlkDev dev;
@@ -243,8 +248,12 @@ bool CFileSystem::DeleteFile(const char *fileName){
         prev = current;
         current = fe.next;
         FATentry newFe(EOF, false);
+        freeSectors++;
         memcpy(&metadata + getFATentryOffset(prev),&newFe, sizeof(FATentry) );
     }
+    FATentry newFe(EOF, false);
+    memcpy(&metadata + getFATentryOffset(current),&newFe, sizeof(FATentry));
+    freeSectors++;
     return true;
 }
 
@@ -257,11 +266,14 @@ FileMetaData CFileSystem::getFileMetaDataAtIndex(int it){
 }
 
 size_t CFileSystem:: FileSize(const char *fileName){
-    int file = findFile(fileName);
+    char correctName[FILENAME_LEN_MAX+1];
+    strncpy(correctName, fileName, FILENAME_LEN_MAX);
+    correctName[FILENAME_LEN_MAX] = 0;
+    int file = findFile(correctName);
     if(file == -1){
         return SIZE_MAX;
     }
-    FileMetaData fmd = getFileMetaData(fileName);
+    FileMetaData fmd = getFileMetaData(correctName);
     return fmd.size;
 }
 bool CFileSystem::FindNext(TFile &file){
@@ -279,7 +291,9 @@ bool CFileSystem::FindNext(TFile &file){
     }
     iterator++;
     file.m_FileSize = fmd.size;
-    strcpy(file.m_FileName , fmd.name);
+    strncpy(file.m_FileName, fmd.name, FILENAME_LEN_MAX);
+    file.m_FileName[FILENAME_LEN_MAX] = 0;
+    printf("Name: %s, size: %zu, firstSector: %zu", fmd.name, fmd.size,fmd.start);
     return true;
 
 }
@@ -290,9 +304,12 @@ bool CFileSystem::FindFirst(TFile &file){
         FileMetaData fmd = getFileMetaDataAtIndex(i);
         if(fmd.valid){
 //            printf("%s\n",file.m_FileName);
-            strcpy(file.m_FileName, fmd.name);
+
+            strncpy(file.m_FileName, fmd.name, FILENAME_LEN_MAX);
+            file.m_FileName[FILENAME_LEN_MAX] = 0;
             file.m_FileSize = fmd.size;
             iterator = i+1;
+            printf("Name: %s, size: %zu, firstSector: %zu", fmd.name, fmd.size,fmd.start);
             return true;
         }
     }
@@ -300,10 +317,14 @@ bool CFileSystem::FindFirst(TFile &file){
 }
 
 void CFileSystem::incrementFileSize(const char * fileName, size_t newSize){
+    char correctFileName [FILENAME_LEN_MAX+1];
+    strncpy(correctFileName, fileName, FILENAME_LEN_MAX);
+    correctFileName[FILENAME_LEN_MAX] = 0;
+
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
         FileMetaData fmd;
         memcpy(&fmd, metadata + i* sizeof(FileMetaData),sizeof(FileMetaData));
-        if(fmd.valid && strcmp(fmd.name, fileName) == 0){
+        if(fmd.valid && strcmp(fmd.name, correctFileName) == 0){
             fmd.size = newSize;
             memcpy(metadata + i* sizeof(FileMetaData), &fmd, sizeof(FileMetaData));
             break;
@@ -336,6 +357,7 @@ size_t CFileSystem::useFreeSector(){
             nextFreeBlock%=maxSectors;
         }
     }
+    freeSectors--;
     return firstFree;
 }
 
@@ -377,9 +399,12 @@ size_t CFileSystem::getFirstNeededSectorNum(size_t offset){
 
 
 FileMetaData  CFileSystem::getFileMetaData(const char * fileName){
+    char correctFileName [FILENAME_LEN_MAX+1];
+    strncpy(correctFileName, fileName, FILENAME_LEN_MAX);
+    correctFileName[FILENAME_LEN_MAX] = 0;
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
         FileMetaData fmd = getFileMetaDataAtIndex(i);
-        if(fmd.valid && strcmp(fmd.name, fileName) == 0){
+        if(fmd.valid && strcmp(fmd.name, correctFileName) == 0){
             return fmd;
         }
     }
@@ -430,15 +455,34 @@ void CFileSystem::truncateFile(const char *fileName, int fileIndex) {
 }
 
 void CFileSystem::pointFATStoEOF(size_t first) {
+    int prev;
     int next = (int)first;
     FATentry fe;
-    do{
-        fe = getFATEntryAtIndex(next);
+    fe = getFATEntryAtIndex(first);
+    if(fe.next == EOF){
+        return;
+    }
+    //set first to EOF
+    next = fe.next;
+    fe.next = EOF;
+    fe.free = false;
+    memcpy(metadata + getFATentryOffset(prev), &fe, sizeof(FATentry));
+
+
+    fe = getFATEntryAtIndex(next);
+    while(fe.next!= EOF){
+        prev = next;
         next = fe.next;
         fe.next = EOF;
         fe.free = true;
-        memcpy(metadata + getFATentryOffset(next),&fe, sizeof(fe));
-    } while(next != EOF);
+        memcpy(metadata + getFATentryOffset(prev), &fe, sizeof(FATentry));
+        freeSectors++;
+        fe = getFATEntryAtIndex(next);
+    }
+    //set the last entry as invalid
+    fe.free = false;
+    memcpy(metadata + getFATentryOffset(prev), &fe, sizeof(FATentry));
+    freeSectors++;
 }
 
 
@@ -469,7 +513,8 @@ int CFileSystem::openExisting(const char * fileName, bool writeMode){
             openFiles[i].isValid = true;
             openFiles[i].offset = 0;
             openFiles[i].writeMode = writeMode;
-            strcpy(openFiles[i].name, fileName);
+            strncpy(openFiles[i].name, fileName, FILENAME_LEN_MAX);
+            openFiles[i].name[FILENAME_LEN_MAX] = 0;
             filesOpened++;
             return i;
         }
@@ -574,6 +619,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
 
     //change offset
     openFiles[fd].offset += len;
+    freeSectors+=numNeededSectors;
     delete [] neededSectors;
     return len;
 }
@@ -633,6 +679,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
 #ifndef __PROGTEST__
 
 //#include "simple_test.inc"
-#include "cool_test.inc"
-
+//#include "cool_test.inc"
+#include "simple_test_mega.inc"
+//#include "another_test.inc"
 #endif /* __PROGTEST__ */
