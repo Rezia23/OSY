@@ -463,6 +463,7 @@ void CFileSystem::pointFATStoEOF(size_t first) {
         return;
     }
     //set first to EOF
+    prev = (int) first;
     next = fe.next;
     fe.next = EOF;
     fe.free = false;
@@ -523,18 +524,28 @@ int CFileSystem::openExisting(const char * fileName, bool writeMode){
 }
 
 int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
-    if(filesOpened >= OPEN_FILES_MAX){
+    char correctFileName [FILENAME_LEN_MAX+1];
+    strncpy(correctFileName, fileName, FILENAME_LEN_MAX);
+    correctFileName[FILENAME_LEN_MAX] = 0;
+
+    //cannot open same file twice
+//    for(size_t i = 0;i<DIR_ENTRIES_MAX;i++){
+//        if(openFiles[i].isValid && strcmp(openFiles[i].name, correctFileName) == 0){
+//            return -1;
+//        }
+//    }
+    if(filesOpened >= OPEN_FILES_MAX || freeSectors == 0){
         return -1;
     }
     if(writeMode){
-        int fileIndex = findFile(fileName);
+        int fileIndex = findFile(correctFileName);
         if(fileIndex != -1){
-            int fd = openExisting(fileName, writeMode);
-            truncateFile(fileName, fileIndex);
+            int fd = openExisting(correctFileName, writeMode);
+            truncateFile(correctFileName, fileIndex);
             return fd;
         } else{
             //create
-            createFile(fileName);
+            createFile(correctFileName);
 
             ///debug
 //            for(int i = 0; i<DIR_ENTRIES_MAX;i++){
@@ -543,7 +554,7 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
 //                printf("reee");
 //            }
 
-            return openExisting(fileName, writeMode);
+            return openExisting(correctFileName, writeMode);
         }
     } else{
         if(findFile(fileName) != -1){
@@ -679,7 +690,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
 #ifndef __PROGTEST__
 
 //#include "simple_test.inc"
-//#include "cool_test.inc"
-#include "simple_test_mega.inc"
+#include "cool_test.inc"
+//#include "simple_test_mega.inc"
 //#include "another_test.inc"
 #endif /* __PROGTEST__ */
