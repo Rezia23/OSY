@@ -175,6 +175,7 @@ private:
     static int sizeOfMetaData;
     static size_t maxSectors;
     static size_t numSectorsForMetadata;
+    int fileCount = 0;
 
     openFileEntry openFiles[OPEN_FILES_MAX];
     size_t filesOpened = 0;
@@ -234,6 +235,7 @@ bool CFileSystem::DeleteFile(const char *fileName){
 //            CloseFile(i);
 //        }
 //    }
+    fileCount--;
     FileMetaData fmd = getFileMetaDataAtIndex(index);
     size_t FATindex = fmd.start;
 
@@ -527,7 +529,7 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
 //            return -1;
 //        }
 //    }
-    if(filesOpened >= OPEN_FILES_MAX || freeSectors == 0){
+    if(filesOpened >= OPEN_FILES_MAX || freeSectors == 0 || fileCount >= DIR_ENTRIES_MAX){
         return -1;
     }
     if(writeMode){
@@ -539,6 +541,7 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
         } else{
             //create
             createFile(correctFileName);
+            fileCount++;
 
             ///debug
 //            for(int i = 0; i<DIR_ENTRIES_MAX;i++){
@@ -572,8 +575,9 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
 
     size_t * neededSectors = new size_t [numNeededSectors];
     int startIndex = 0;
+    size_t lastUsedSector = getLastUsedSector(fmd.start);
     if(openFiles[fd].offset%SECTOR_SIZE != 0 || fmd.size == 0 ){
-        neededSectors[0] = getLastUsedSector(fmd.start);
+        neededSectors[0] = lastUsedSector;
         startIndex++;
     }
     for(size_t i = startIndex; i<numNeededSectors;i++){
@@ -620,6 +624,9 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
             changeFATentry(neededSectors[i], neededSectors[i+1]);
         }
     }
+    if(lastUsedSector != neededSectors[0]){
+        changeFATentry(lastUsedSector, neededSectors[0]);
+    }
     //change size
     incrementFileSize(openFiles[fd].name, len+openFiles[fd].offset); //for Write files is offset same as size
 
@@ -641,6 +648,9 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
     }
 
     size_t firstNeededSectorNum = getFirstNeededSectorNum(openFiles[fd].offset);
+    if(openFiles[fd].offset%SECTOR_SIZE==0 && openFiles[fd].offset!=0){
+        firstNeededSectorNum++;
+    }
 
     size_t numNeededSectors = getNumNeededSectors(openFiles[fd].offset, numToActuallyRead);
 
@@ -686,7 +696,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
 #ifndef __PROGTEST__
 
 //#include "simple_test.inc"
-#include "cool_test.inc"
-//#include "simple_test_mega.inc"
+//#include "cool_test.inc"
+#include "simple_test_mega.inc"
 //#include "another_test.inc"
 #endif /* __PROGTEST__ */
