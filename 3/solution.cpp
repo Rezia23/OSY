@@ -236,24 +236,12 @@ bool CFileSystem::DeleteFile(const char *fileName){
     fmd.valid = false;
     memcpy(metadata + getFileMetaDataOffset(index), &fmd, sizeof(fmd));
     //delete FATs
-    size_t current = FATindex;
-    FATentry fe;
-    size_t prev;
 
-    while(true){
-        fe = getFATEntryAtIndex(current);
-        if(fe.next == EOF){
-            break;
-        }
-        prev = current;
-        current = fe.next;
-        FATentry newFe(EOF, false);
-        freeSectors++;
-        memcpy(&metadata + getFATentryOffset(prev),&newFe, sizeof(FATentry) );
-    }
-    FATentry newFe(EOF, false);
-    memcpy(&metadata + getFATentryOffset(current),&newFe, sizeof(FATentry));
+    pointFATStoEOF(FATindex);
+    FATentry fe(EOF, true);
+    memcpy(metadata + getFATentryOffset(FATindex), &fe, sizeof(FATentry));
     freeSectors++;
+
     return true;
 }
 
