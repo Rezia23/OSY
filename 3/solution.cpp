@@ -292,6 +292,7 @@ bool CFileSystem::FindFirst(TFile &file){
 //            printf("%s\n",file.m_FileName);
             strcpy(file.m_FileName, fmd.name);
             file.m_FileSize = fmd.size;
+            iterator = i+1;
             return true;
         }
     }
@@ -513,7 +514,7 @@ size_t CFileSystem::getFollowingFATEntryIndex(size_t prevSector){
 }
 
 size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
-    if(!openFiles[fd].writeMode){
+    if(!openFiles[fd].writeMode || len == 0){
         return 0;
     }
     FileMetaData fmd = getFileMetaData(openFiles[fd].name);
@@ -578,7 +579,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
 }
 
 size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
-    if(openFiles[fd].writeMode){
+    if(openFiles[fd].writeMode || len == 0){
         return 0;
     }
     FileMetaData fmd = getFileMetaData(openFiles[fd].name);
