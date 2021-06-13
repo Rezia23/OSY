@@ -109,16 +109,17 @@ public:
             numSectorsForMetadata++;
         }
         freeSectors = maxSectors - numSectorsForMetadata;
-        metadata = new char [numSectorsForMetadata*SECTOR_SIZE];
-        memset(metadata, 0, numSectorsForMetadata*SECTOR_SIZE);
-        dev.m_Read(0, metadata, numSectorsForMetadata);
-//        printf("rozbije se to uz tady\n");
-//        FileMetaData fmd = getFileMetaDataAtIndex(0);
-//        if(fmd.valid){
-//            printf("valid");
-//        }else{
-//            printf("invalid");
-//        }
+        char * mem = new char [numSectorsForMetadata*SECTOR_SIZE];
+        memset(mem, 0, numSectorsForMetadata*SECTOR_SIZE);
+        dev.m_Read(0, mem, numSectorsForMetadata);
+
+        //copy file entries
+        memcpy(&fileMetaData, mem, sizeof(FileMetaData)*DIR_ENTRIES_MAX);
+        memcpy(&firstFreeSector, mem + sizeof(FileMetaData)*DIR_ENTRIES_MAX, sizeof(size_t));
+        FAT = new FATentry[maxSectors];
+        memcpy(FAT, mem + sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t), maxSectors*sizeof(FATentry));
+        delete [] mem;
+
     }
 
     static bool CreateFs(const TBlkDev &dev);
@@ -132,15 +133,14 @@ public:
             }
         }
 
+        char * mem = new char [numSectorsForMetadata * SECTOR_SIZE];
+        memcpy(mem, &fileMetaData, DIR_ENTRIES_MAX * sizeof(FileMetaData));
+        memcpy(mem + DIR_ENTRIES_MAX * sizeof(FileMetaData), &firstFreeSector, sizeof(size_t));
+        memcpy(mem + DIR_ENTRIES_MAX * sizeof(FileMetaData) + sizeof(size_t), FAT, maxSectors * sizeof(FATentry));
 
+        dev.m_Write(0, mem, numSectorsForMetadata);
 
-        dev.m_Write(0, metadata, numSectorsForMetadata);
-
-        //debug
-        dev.m_Read(0, metadata, numSectorsForMetadata);
-
-
-        delete [] metadata;
+        delete [] mem;
         return true;
     }
 
@@ -169,26 +169,37 @@ public:
 
 private:
     int freeSectors;
-    char * metadata;
     int iterator = 0;
     TBlkDev dev;
-    static int sizeOfMetaData;
-    static size_t maxSectors;
-    static size_t numSectorsForMetadata;
+    int sizeOfMetaData;
+    size_t maxSectors;
+    size_t numSectorsForMetadata;
     int fileCount = 0;
     openFileEntry openFiles[OPEN_FILES_MAX];
     size_t filesOpened = 0;
 
-    static void writeInfoData(FileSystemInfo & data, size_t len, const TBlkDev & dev, size_t numSectorsUsed){
+    FileMetaData fileMetaData[DIR_ENTRIES_MAX];
+    size_t firstFreeSector = 0;
+    FATentry * FAT;
+
+
+    static void writeInfoData(FileSystemInfo & data, size_t len, const TBlkDev & dev, size_t numSectorsUsed, size_t maxSectors){
         char * mem = new char [numSectorsUsed*SECTOR_SIZE];
         memset(mem, 0, numSectorsUsed*SECTOR_SIZE);
         //copy static stuff
         memcpy(mem, data.fileMetaData, sizeof(FileMetaData)*DIR_ENTRIES_MAX);
-        memcpy(mem + sizeof(FileMetaData)*DIR_ENTRIES_MAX, &data.firstFreeBlock, sizeof(size_t));
+        memcpy(mem + (sizeof(FileMetaData)*DIR_ENTRIES_MAX), &data.firstFreeBlock, sizeof(size_t));
 
         //copy FAT entries
-        memcpy(mem+sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t), data.FAT, sizeof(FATentry)*maxSectors);
+        memcpy(mem+(sizeof(FileMetaData)*DIR_ENTRIES_MAX) + sizeof(size_t), data.FAT, sizeof(FATentry)*maxSectors);
         dev.m_Write(0, mem, numSectorsUsed);
+
+        dev.m_Read(0,mem, numSectorsUsed);
+        FATentry fe;
+        memcpy(&fe, mem + sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t) + sizeof(FATentry)*(maxSectors-1), sizeof(FATentry));
+        memcpy(&fe, mem + sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t) + sizeof(FATentry)*1, sizeof(FATentry));
+        memcpy(&fe, mem + sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t) + sizeof(FATentry)*10, sizeof(FATentry));
+        memcpy(&fe, mem + sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t) + sizeof(FATentry)*(maxSectors-2), sizeof(FATentry));
 
         delete [] mem;
     }
@@ -219,11 +230,6 @@ private:
     FileMetaData getFileMetaDataAtIndex(int it);
 };
 
-int CFileSystem::sizeOfMetaData = 0;
-size_t CFileSystem:: maxSectors = 0;
-size_t CFileSystem::numSectorsForMetadata = 0;
-
-
 
 bool CFileSystem::DeleteFile(const char *fileName){
     int index = findFile(fileName);
@@ -236,28 +242,23 @@ bool CFileSystem::DeleteFile(const char *fileName){
 //        }
 //    }
     fileCount--;
-    FileMetaData fmd = getFileMetaDataAtIndex(index);
-    size_t FATindex = fmd.start;
+    size_t FATindex = fileMetaData[index].start;
 
     //write fmd as invalid
-    fmd.valid = false;
-    memcpy(metadata + getFileMetaDataOffset(index), &fmd, sizeof(fmd));
+    fileMetaData[index].valid = false;
+
     //delete FATs
 
     pointFATStoEOF(FATindex);
-    FATentry fe(EOF, true);
-    memcpy(metadata + getFATentryOffset(FATindex), &fe, sizeof(FATentry));
+    FAT[FATindex].next = EOF;
+    FAT[FATindex].free = true;
     freeSectors++;
 
     return true;
 }
 
 FileMetaData CFileSystem::getFileMetaDataAtIndex(int it){
-    FileMetaData fmd;
-//    printf("index is %d\n", it);
-//    printf("fmd offset is %d \n", getFileMetaDataOffset(0));
-    memcpy(&fmd, metadata + getFileMetaDataOffset(it), sizeof(FileMetaData));
-    return fmd;
+    return fileMetaData[it];
 }
 
 size_t CFileSystem:: FileSize(const char *fileName){
@@ -317,11 +318,8 @@ void CFileSystem::incrementFileSize(const char * fileName, size_t newSize){
     correctFileName[FILENAME_LEN_MAX] = 0;
 
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
-        FileMetaData fmd;
-        memcpy(&fmd, metadata + i* sizeof(FileMetaData),sizeof(FileMetaData));
-        if(fmd.valid && strcmp(fmd.name, correctFileName) == 0){
-            fmd.size = newSize;
-            memcpy(metadata + i* sizeof(FileMetaData), &fmd, sizeof(FileMetaData));
+        if(fileMetaData[i].valid && strcmp(fileMetaData[i].name, correctFileName) == 0){
+            fileMetaData[i].size = newSize;
             break;
         }
     }
@@ -329,23 +327,17 @@ void CFileSystem::incrementFileSize(const char * fileName, size_t newSize){
 
 
 void CFileSystem::changeFATentry(size_t sector, size_t nextSector){
-    FATentry originalFe;
-    memcpy(&originalFe, metadata + getFATentryOffset(sector), sizeof(FATentry));
-
-    FATentry newFe(nextSector, originalFe.free);        //might be problem with types
-    memcpy(metadata + getFATentryOffset(sector),&newFe, sizeof(FATentry));
+    FAT[sector].next = nextSector;
 }
 
 
 size_t CFileSystem::useFreeSector(){
-    size_t firstFree;
-    memcpy(&firstFree, metadata + getFirstFreeBlockIndexOffset(), sizeof(size_t));
+    size_t firstFree = firstFreeSector;
     //find next free
     size_t nextFreeBlock = firstFree+1;
     while(nextFreeBlock != firstFree){     //might be possibly broken if no blocks are free
-        FATentry nextEntry = getFATEntryAtIndex(nextFreeBlock);
-        if(nextEntry.free){
-            memcpy(metadata + getFirstFreeBlockIndexOffset(), &nextFreeBlock, sizeof(size_t));
+        if(FAT[nextFreeBlock].free){
+            firstFreeSector = nextFreeBlock;
             break;
         } else{
             nextFreeBlock++;
@@ -367,9 +359,7 @@ size_t CFileSystem::getLastUsedSector(size_t first){
 }
 
 FATentry CFileSystem::getFATEntryAtIndex(size_t index){
-    FATentry fe;
-    memcpy(&fe, metadata + getFATentryOffset(index), sizeof(FATentry));
-    return fe;
+    return FAT[index];
 }
 
 size_t CFileSystem::getNumNeededSectors(size_t offset,size_t numToRead ){
@@ -409,9 +399,7 @@ FileMetaData  CFileSystem::getFileMetaData(const char * fileName){
 int CFileSystem::findFile(const char *fileName) const {
 
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
-        FileMetaData fmd;
-        memcpy(&fmd, metadata + i* sizeof(FileMetaData),sizeof(FileMetaData));
-        if(fmd.valid && strcmp(fmd.name, fileName) == 0){
+        if(fileMetaData[i].valid && strcmp(fileMetaData[i].name, fileName) == 0){
             return i;
         }
     }
@@ -424,17 +412,17 @@ void CFileSystem::createFile(const char *fileName) {
     size_t firstFreeBlock = useFreeSector();
 
     //write EOF to used sector in FAT
-    FATentry fe(EOF, false);
-    memcpy(metadata+ getFATentryOffset(firstFreeBlock), &fe, sizeof(fe) );
+    FAT[firstFreeBlock].free = false;
+    FAT[firstFreeBlock].next = EOF;
 
 
     //put entry to FileEntry array
     for(int i = 0; i<DIR_ENTRIES_MAX;i++){
-        FileMetaData fmd;
-        memcpy(&fmd, metadata + i* sizeof(FileMetaData),sizeof(FileMetaData));
-        if(!fmd.valid){
-            FileMetaData newFmd (fileName, 0, firstFreeBlock, true) ;
-            memcpy(metadata + i* sizeof(FileMetaData), &newFmd, sizeof(newFmd));
+        if(!fileMetaData[i].valid){
+            fileMetaData[i].valid = true;
+            strcpy(fileMetaData[i].name, fileName);
+            fileMetaData[i].size = 0;
+            fileMetaData[i].start = firstFreeBlock;
             break;
         }
     }
@@ -442,42 +430,33 @@ void CFileSystem::createFile(const char *fileName) {
 
 
 void CFileSystem::truncateFile(const char *fileName, int fileIndex) {
-    FileMetaData fmd;
-    memcpy(&fmd, metadata + getFileMetaDataOffset(fileIndex), sizeof(fmd));
-    pointFATStoEOF(fmd.start);
-    fmd.size = 0;
-    memcpy(metadata + getFileMetaDataOffset(fileIndex),&fmd,  sizeof(fmd));
+    pointFATStoEOF(fileMetaData[fileIndex].start);
+    fileMetaData[fileIndex].size = 0;;
 }
 
 void CFileSystem::pointFATStoEOF(size_t first) {
     int prev;
     int next = (int)first;
-    FATentry fe;
-    fe = getFATEntryAtIndex(first);
-    if(fe.next == EOF){
+
+    if(FAT[first].next == EOF){
         return;
     }
     //set first to EOF
     prev = (int) first;
-    next = fe.next;
-    fe.next = EOF;
-    fe.free = false;
-    memcpy(metadata + getFATentryOffset(prev), &fe, sizeof(FATentry));
+    next = FAT[first].next;
 
+    FAT[first].next = EOF;
+    FAT[first].free = false;
 
-    fe = getFATEntryAtIndex(next);
-    while(fe.next!= EOF){
+    while(FAT[next].next!= EOF){
         prev = next;
-        next = fe.next;
-        fe.next = EOF;
-        fe.free = true;
-        memcpy(metadata + getFATentryOffset(prev), &fe, sizeof(FATentry));
+        next = FAT[next].next;
+        FAT[next].next = EOF;
+        FAT[next].free = true;
         freeSectors++;
-        fe = getFATEntryAtIndex(next);
     }
     //set the last entry as invalid
-    fe.free = true;
-    memcpy(metadata + getFATentryOffset(prev), &fe, sizeof(FATentry));
+    FAT[next].free = true;
     freeSectors++;
 }
 
@@ -485,15 +464,15 @@ void CFileSystem::pointFATStoEOF(size_t first) {
 
 
 bool CFileSystem::CreateFs(const TBlkDev &dev) {
-    maxSectors = dev.m_Sectors;
     FileSystemInfo fsInfo(dev.m_Sectors);
-    sizeOfMetaData = sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t) + sizeof(FATentry)*maxSectors;
-    numSectorsForMetadata = sizeOfMetaData/SECTOR_SIZE;
+    size_t maxSectors = dev.m_Sectors;
+    size_t sizeOfMetaData = sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t) + sizeof(FATentry)*maxSectors;
+    size_t numSectorsForMetadata = sizeOfMetaData/SECTOR_SIZE;
     if(sizeOfMetaData%SECTOR_SIZE != 0){
         numSectorsForMetadata++;
     }
     fsInfo.useFirstNBlocks(numSectorsForMetadata);
-    writeInfoData(fsInfo, sizeof(fsInfo), dev, numSectorsForMetadata);
+    writeInfoData(fsInfo, sizeof(fsInfo), dev, numSectorsForMetadata, maxSectors);
     //printf("whole info %d\n filemetadata %d\n size_t %d\n FATentry %d\n", sizeof(fsInfo), sizeof(FileMetaData), sizeof(size_t), sizeof(FATentry));
     return true;
 }
@@ -708,7 +687,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
 #ifndef __PROGTEST__
 
 //#include "simple_test.inc"
-//#include "cool_test.inc"
-#include "simple_test_mega.inc"
+#include "cool_test.inc"
+//#include "simple_test_mega.inc"
 //#include "another_test.inc"
 #endif /* __PROGTEST__ */
