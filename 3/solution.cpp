@@ -119,7 +119,9 @@ public:
         FAT = new FATentry[maxSectors];
         memcpy(FAT, mem + sizeof(FileMetaData)*DIR_ENTRIES_MAX + sizeof(size_t), maxSectors*sizeof(FATentry));
         delete [] mem;
-
+    }
+    ~CFileSystem(){
+        delete [] FAT;
     }
 
     static bool CreateFs(const TBlkDev &dev);
@@ -333,19 +335,20 @@ void CFileSystem::changeFATentry(size_t sector, size_t nextSector){
 
 size_t CFileSystem::useFreeSector(){
     size_t firstFree = firstFreeSector;
+    FAT[firstFree].free = false;
     //find next free
     size_t nextFreeBlock = firstFree+1;
     while(nextFreeBlock != firstFree){     //might be possibly broken if no blocks are free
         if(FAT[nextFreeBlock].free){
             firstFreeSector = nextFreeBlock;
-            break;
+            freeSectors--;
+            return firstFree;
         } else{
             nextFreeBlock++;
-            nextFreeBlock%=maxSectors;
+            nextFreeBlock = nextFreeBlock%maxSectors;
         }
     }
-    freeSectors--;
-    return firstFree;
+   return 0;
 }
 
 size_t CFileSystem::getLastUsedSector(size_t first){
@@ -428,10 +431,9 @@ void CFileSystem::createFile(const char *fileName) {
     }
 }
 
-
 void CFileSystem::truncateFile(const char *fileName, int fileIndex) {
     pointFATStoEOF(fileMetaData[fileIndex].start);
-    fileMetaData[fileIndex].size = 0;;
+    fileMetaData[fileIndex].size = 0;
 }
 
 void CFileSystem::pointFATStoEOF(size_t first) {
@@ -450,9 +452,9 @@ void CFileSystem::pointFATStoEOF(size_t first) {
 
     while(FAT[next].next!= EOF){
         prev = next;
-        next = FAT[next].next;
-        FAT[next].next = EOF;
-        FAT[next].free = true;
+        next = FAT[prev].next;
+        FAT[prev].next = EOF;
+        FAT[prev].free = true;
         freeSectors++;
     }
     //set the last entry as invalid
@@ -502,40 +504,23 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
     strncpy(correctFileName, fileName, FILENAME_LEN_MAX);
     correctFileName[FILENAME_LEN_MAX] = 0;
 
-    //cannot open same file twice
-//    for(size_t i = 0;i<DIR_ENTRIES_MAX;i++){
-//        if(openFiles[i].isValid && strcmp(openFiles[i].name, correctFileName) == 0){
-//            return -1;
-//        }
-//    }
     if(filesOpened >= OPEN_FILES_MAX || freeSectors <= 0 || fileCount >= DIR_ENTRIES_MAX){
         return -1;
     }
-    if(writeMode){
-        int fileIndex = findFile(correctFileName);
-        if(fileIndex != -1){
-            int fd = openExisting(correctFileName, writeMode);
-            truncateFile(correctFileName, fileIndex);
-            return fd;
+    int fileIndex = findFile(correctFileName);
+    if(fileIndex == -1){    //file does not exist
+        if(!writeMode){
+            return -1;
         } else{
-            //create
-            createFile(correctFileName);
-            fileCount++;
-
-            ///debug
-//            for(int i = 0; i<DIR_ENTRIES_MAX;i++){
-//                FileMetaData fmd;
-//                fmd = getFileMetaDataAtIndex(i);
-//                printf("reee");
-//            }
-
+            createFile(fileName);
             return openExisting(correctFileName, writeMode);
         }
-    } else{
-        if(findFile(fileName) != -1){
-            return openExisting(fileName, writeMode);
-        } else{
-            return -1;
+    } else{                 //file exists
+        if(!writeMode){
+           return openExisting(correctFileName, writeMode);
+        } else{             //truncate
+            truncateFile(correctFileName, fileIndex);
+            return openExisting(correctFileName, writeMode);
         }
     }
 }
