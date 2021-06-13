@@ -98,7 +98,7 @@ struct openFileEntry{
 };
 class CFileSystem {
 public:
-    size_t FreeSectorsCount(){
+    int FreeSectorsCount(){
         return freeSectors;
     }
     CFileSystem(TBlkDev oldDev) : dev((oldDev)){
@@ -168,7 +168,7 @@ public:
     bool FindNext(TFile &file);
 
 private:
-    size_t freeSectors;
+    int freeSectors;
     char * metadata;
     int iterator = 0;
     TBlkDev dev;
@@ -176,9 +176,9 @@ private:
     static size_t maxSectors;
     static size_t numSectorsForMetadata;
     int fileCount = 0;
-
     openFileEntry openFiles[OPEN_FILES_MAX];
     size_t filesOpened = 0;
+
     static void writeInfoData(FileSystemInfo & data, size_t len, const TBlkDev & dev, size_t numSectorsUsed){
         char * mem = new char [numSectorsUsed*SECTOR_SIZE];
         memset(mem, 0, numSectorsUsed*SECTOR_SIZE);
@@ -288,7 +288,7 @@ bool CFileSystem::FindNext(TFile &file){
     file.m_FileSize = fmd.size;
     strncpy(file.m_FileName, fmd.name, FILENAME_LEN_MAX);
     file.m_FileName[FILENAME_LEN_MAX] = 0;
-    printf("Name: %s, size: %zu, firstSector: %zu", fmd.name, fmd.size,fmd.start);
+//    printf("Name: %s, size: %zu, firstSector: %zu", fmd.name, fmd.size,fmd.start);
     return true;
 
 }
@@ -304,7 +304,7 @@ bool CFileSystem::FindFirst(TFile &file){
             file.m_FileName[FILENAME_LEN_MAX] = 0;
             file.m_FileSize = fmd.size;
             iterator = i+1;
-            printf("Name: %s, size: %zu, firstSector: %zu", fmd.name, fmd.size,fmd.start);
+//            printf("Name: %s, size: %zu, firstSector: %zu", fmd.name, fmd.size,fmd.start);
             return true;
         }
     }
@@ -529,7 +529,7 @@ int CFileSystem::OpenFile(const char *fileName, bool writeMode) {
 //            return -1;
 //        }
 //    }
-    if(filesOpened >= OPEN_FILES_MAX || freeSectors == 0 || fileCount >= DIR_ENTRIES_MAX){
+    if(filesOpened >= OPEN_FILES_MAX || freeSectors <= 0 || fileCount >= DIR_ENTRIES_MAX){
         return -1;
     }
     if(writeMode){
@@ -566,6 +566,9 @@ size_t CFileSystem::getFollowingFATEntryIndex(size_t prevSector){
 }
 
 size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
+    if(fd == -1){
+        return 0;
+    }
     if(!openFiles[fd].writeMode || len == 0 || !openFiles[fd].isValid){
         return 0;
     }
@@ -575,12 +578,18 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
 
     size_t * neededSectors = new size_t [numNeededSectors];
     int startIndex = 0;
+    size_t endIndex = numNeededSectors;
+
     size_t lastUsedSector = getLastUsedSector(fmd.start);
     if(openFiles[fd].offset%SECTOR_SIZE != 0 || fmd.size == 0 ){
         neededSectors[0] = lastUsedSector;
         startIndex++;
     }
     for(size_t i = startIndex; i<numNeededSectors;i++){
+        if(freeSectors <=0){
+            endIndex = i;
+            break;
+        }
         //find free sector
         neededSectors[i] = useFreeSector();
     }
@@ -588,7 +597,7 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
     char * dataC = (char *) data;
     char sector[SECTOR_SIZE];
     size_t writePointer = 0;
-    for(size_t i = 0; i<numNeededSectors;i++){
+    for(size_t i = 0; i<endIndex;i++){
         //printf("Writing to sector %zu \n", neededSectors[i]);
         if(numNeededSectors == 1 && openFiles[fd].offset%SECTOR_SIZE != 0){
             dev.m_Read(neededSectors[i], sector, 1);
@@ -617,26 +626,29 @@ size_t CFileSystem::WriteFile(int fd, const void *data, size_t len){
     }
 
     //change entries in FAT
-    for(size_t i = 0; i<numNeededSectors;i++){
-        if(i == numNeededSectors-1){
+    for(size_t i = 0; i<endIndex;i++){
+        if(i == endIndex-1){
             changeFATentry(neededSectors[i], EOF);
         } else{
             changeFATentry(neededSectors[i], neededSectors[i+1]);
         }
     }
-    if(lastUsedSector != neededSectors[0]){
+    if(lastUsedSector != neededSectors[0] && endIndex >=1){
         changeFATentry(lastUsedSector, neededSectors[0]);
     }
     //change size
-    incrementFileSize(openFiles[fd].name, len+openFiles[fd].offset); //for Write files is offset same as size
+    incrementFileSize(openFiles[fd].name, writePointer+openFiles[fd].offset); //for Write files is offset same as size
 
     //change offset
-    openFiles[fd].offset += len;
+    openFiles[fd].offset += writePointer;
     delete [] neededSectors;
     return writePointer;
 }
 
 size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
+    if(fd==-1){
+        return 0;
+    }
     if(openFiles[fd].writeMode || len == 0){
         return 0;
     }
@@ -664,7 +676,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
         nextSector = getFollowingFATEntryIndex(nextSector);
     }
 
-    char * output  = new char [numToActuallyRead];
+    char * output = (char *) data;
     char sector [SECTOR_SIZE];
     size_t outputPointer = 0;
     for(size_t i = 0; i<numNeededSectors;i++){
@@ -688,7 +700,7 @@ size_t CFileSystem::ReadFile(int fd, void *data, size_t len) {
     memcpy(data, output, numToActuallyRead);
     openFiles[fd].offset+= numToActuallyRead;
     delete [] neededSectors;
-    delete [] output;
+//    delete [] output;
     return outputPointer;
 }
 
